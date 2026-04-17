@@ -47,6 +47,10 @@
     return berlinDateFmt.format(new Date());
   }
 
+  // Holds the most recent full data object so the delegated click handler
+  // on the daily grid always uses fresh API data without rebuilding listeners.
+  let _lastData = null;
+
   // ---------- Hero ----------
   function renderHero(data) {
     const c     = data.current;
@@ -77,6 +81,25 @@
 
     [heroIcon, heroTemp, heroDesc, statFeels, statHighLow, statWind, statHumidity, statUv, statPrecip]
       .forEach(removeSkeleton);
+
+    // Weather alert chip
+    const alertEl = document.getElementById('weather-alert');
+    if (alertEl) {
+      const code = today ? today.weatherCode : c.weatherCode;
+      let type, icon, text;
+      if (code >= 95) {
+        type = 'storm'; icon = '⛈️'; text = 'Gewitter heute';
+      } else if ((code >= 71 && code <= 77) || code === 85 || code === 86) {
+        type = 'snow'; icon = '❄️'; text = 'Schnee heute';
+      } else if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) {
+        type = 'rain'; icon = '🌧️'; text = 'Regen heute';
+      } else {
+        type = 'clear'; icon = '✅'; text = 'Kein Niederschlag heute';
+      }
+      alertEl.className = 'weather-alert ' + type;
+      alertEl.textContent = icon + ' ' + text;
+      alertEl.hidden = false;
+    }
   }
 
   // ---------- Sun Card ----------
@@ -200,6 +223,7 @@
 
   // ---------- Daily Grid ----------
   function renderDaily(data) {
+    _lastData = data;
     const grid = document.getElementById('daily-grid');
 
     if (!data.daily || !data.daily.length) {
@@ -208,6 +232,7 @@
       return;
     }
 
+    initDailyClickHandler();
     const todayStr = todayBerlin();
 
     // In-place update on refresh — only if items are already fully rendered (not skeletons).
@@ -228,6 +253,18 @@
         item.querySelector('.temp-low').textContent    = round(d.tempMin) + '\u00B0';
         item.querySelector('.daily-precip').textContent = '💧 ' + fmtNum(d.precipitationSum, 1) + ' mm';
       });
+      // Refresh the detail panel if a day is currently selected.
+      const selected = grid.querySelector('.daily-item.selected');
+      if (selected) {
+        const selIdx = parseInt(selected.dataset.dayIndex, 10);
+        if (!isNaN(selIdx)) {
+          const d        = data.daily[selIdx];
+          const todStr   = todayBerlin();
+          const dStr     = berlinDateFmt.format(d.date);
+          const lbl      = dStr === todStr ? 'Heute' : (selIdx === 1 ? 'Morgen' : weekdayFmt.format(d.date));
+          renderDayDetail(d, data.hourly.slice(selIdx * 24, (selIdx + 1) * 24), lbl);
+        }
+      }
       return;
     }
 
@@ -236,6 +273,7 @@
     data.daily.forEach(function (d, idx) {
       const item    = document.createElement('div');
       item.className = 'daily-item';
+      item.dataset.dayIndex = String(idx);
 
       const dateStr  = berlinDateFmt.format(d.date);
       const dayLabel = dateStr === todayStr ? 'Heute' : (idx === 1 ? 'Morgen' : weekdayFmt.format(d.date));
@@ -285,6 +323,145 @@
     grid.appendChild(frag);
   }
 
+  // ---------- Day Detail Panel ----------
+  function renderDayDetail(day, hourlySlice, dayLabel) {
+    const panel = document.getElementById('day-detail');
+    if (!panel) return;
+
+    const frag = document.createDocumentFragment();
+
+    // Header: icon + title + description
+    const header = document.createElement('div');
+    header.className = 'day-detail-header';
+
+    const iconEl = document.createElement('span');
+    iconEl.className = 'day-detail-icon';
+    iconEl.textContent = day.description.icon;
+
+    const titleWrap = document.createElement('div');
+    const titleEl = document.createElement('h3');
+    titleEl.className = 'day-detail-title';
+    titleEl.textContent = dayLabel + ' \u00B7 ' + dateShortFmt.format(day.date);
+    const descEl = document.createElement('p');
+    descEl.className = 'day-detail-desc';
+    descEl.textContent = day.description.label;
+    titleWrap.appendChild(titleEl);
+    titleWrap.appendChild(descEl);
+    header.appendChild(iconEl);
+    header.appendChild(titleWrap);
+    frag.appendChild(header);
+
+    // Stats grid
+    const durMs = (day.sunrise && day.sunset) ? day.sunset.getTime() - day.sunrise.getTime() : 0;
+    const durH  = Math.floor(durMs / 3_600_000);
+    const durM  = Math.floor((durMs % 3_600_000) / 60_000);
+    const stats = [
+      { label: 'H\u00F6chst',      value: round(day.tempMax) + '\u00B0' },
+      { label: 'Tiefst',           value: round(day.tempMin) + '\u00B0' },
+      { label: 'Aufgang',          value: day.sunrise ? hourFmt.format(day.sunrise) : '--:--' },
+      { label: 'Untergang',        value: day.sunset  ? hourFmt.format(day.sunset)  : '--:--' },
+      { label: 'Tageslänge',       value: durMs ? durH + ' h ' + (durM < 10 ? '0' : '') + durM + ' min' : '--' },
+      { label: 'UV-Index (max)',   value: fmtNum(day.uvIndexMax, 1) },
+      { label: 'Niederschlag',     value: fmtNum(day.precipitationSum, 1) + ' mm' }
+    ];
+
+    const statsGrid = document.createElement('div');
+    statsGrid.className = 'day-detail-stats';
+    stats.forEach(function (s) {
+      const statEl  = document.createElement('div');
+      statEl.className = 'stat';
+      const lblEl = document.createElement('span');
+      lblEl.className   = 'stat-label';
+      lblEl.textContent = s.label;
+      const valEl = document.createElement('span');
+      valEl.className   = 'stat-value';
+      valEl.textContent = s.value;
+      statEl.appendChild(lblEl);
+      statEl.appendChild(valEl);
+      statsGrid.appendChild(statEl);
+    });
+    frag.appendChild(statsGrid);
+
+    // Hourly strip for the selected day
+    if (hourlySlice && hourlySlice.length) {
+      const hourlyLabel = document.createElement('div');
+      hourlyLabel.className   = 'day-detail-hourly-label';
+      hourlyLabel.textContent = 'Stündliche Übersicht';
+      frag.appendChild(hourlyLabel);
+
+      const strip = document.createElement('div');
+      strip.className = 'hourly-strip';
+      strip.setAttribute('role', 'list');
+
+      hourlySlice.forEach(function (h) {
+        const item = document.createElement('div');
+        item.className = 'hourly-item';
+        item.setAttribute('role', 'listitem');
+
+        const timeEl = document.createElement('span');
+        timeEl.className   = 'hourly-time';
+        timeEl.textContent = hourFmt.format(h.time);
+
+        const iconH = document.createElement('span');
+        iconH.className   = 'hourly-icon';
+        iconH.textContent = h.description.icon;
+        iconH.title       = h.description.label;
+
+        const tempEl = document.createElement('span');
+        tempEl.className   = 'hourly-temp';
+        tempEl.textContent = round(h.temperature) + '\u00B0';
+
+        const precipEl = document.createElement('span');
+        precipEl.className   = 'hourly-precip';
+        const p = h.precipitationProbability;
+        precipEl.textContent = '💧 ' + (typeof p === 'number' ? p : 0) + '%';
+        precipEl.title       = 'Regenwahrscheinlichkeit';
+
+        item.appendChild(timeEl);
+        item.appendChild(iconH);
+        item.appendChild(tempEl);
+        item.appendChild(precipEl);
+        strip.appendChild(item);
+      });
+      frag.appendChild(strip);
+    }
+
+    clearChildren(panel);
+    panel.appendChild(frag);
+    panel.hidden = false;
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function hideDayDetail() {
+    const panel = document.getElementById('day-detail');
+    if (panel) panel.hidden = true;
+  }
+
+  function initDailyClickHandler() {
+    const grid = document.getElementById('daily-grid');
+    if (!grid || grid._detailHandlerAttached) return;
+    grid._detailHandlerAttached = true;
+    grid.addEventListener('click', function (e) {
+      const item = e.target.closest('.daily-item');
+      if (!item || !_lastData) return;
+      const idx = parseInt(item.dataset.dayIndex, 10);
+      if (isNaN(idx)) return;
+      const wasSelected = item.classList.contains('selected');
+      grid.querySelectorAll('.daily-item').forEach(function (el) { el.classList.remove('selected'); });
+      if (wasSelected) {
+        hideDayDetail();
+      } else {
+        item.classList.add('selected');
+        const d          = _lastData.daily[idx];
+        const todayStr   = todayBerlin();
+        const dateStr    = berlinDateFmt.format(d.date);
+        const dayLabel   = dateStr === todayStr ? 'Heute' : (idx === 1 ? 'Morgen' : weekdayFmt.format(d.date));
+        const hourlySlice = _lastData.hourly.slice(idx * 24, (idx + 1) * 24);
+        renderDayDetail(d, hourlySlice, dayLabel);
+      }
+    });
+  }
+
   // ---------- Header / status ----------
   function renderUpdatedAt(date) {
     const el = document.getElementById('last-updated');
@@ -318,6 +495,8 @@
     renderSun:       renderSun,
     renderHourly:    renderHourly,
     renderDaily:     renderDaily,
+    renderDayDetail: renderDayDetail,
+    hideDayDetail:   hideDayDetail,
     renderUpdatedAt: renderUpdatedAt,
     showError:       showError,
     hideError:       hideError,

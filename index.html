@@ -69,6 +69,7 @@
             <div id="hero-desc" class="hero-desc skeleton-text">Lade&hellip;</div>
           </div>
         </div>
+        <div id="weather-alert" class="weather-alert" hidden></div>
       </div>
 
       <div class="hero-right">
@@ -170,7 +171,7 @@
     <section class="card daily-card" aria-labelledby="daily-title">
       <div class="card-header">
         <h3 id="daily-title">7-Tage-Vorhersage</h3>
-        <span class="card-sub">Nürnberg</span>
+        <span class="card-sub">Nürnberg &middot; Tag anklicken für Details</span>
       </div>
       <div id="daily-grid" class="daily-grid">
         <div class="daily-item skeleton-box"></div>
@@ -181,6 +182,10 @@
         <div class="daily-item skeleton-box"></div>
         <div class="daily-item skeleton-box"></div>
       </div>
+    </section>
+
+    <!-- Day Detail Panel -->
+    <section id="day-detail" class="card day-detail-card" hidden aria-live="polite" aria-label="Tagesdetails">
     </section>
   </main>
 

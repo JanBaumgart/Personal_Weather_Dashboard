@@ -180,6 +180,11 @@ a:hover { text-decoration: underline; }
     radial-gradient(circle at top right, rgba(56, 189, 248, 0.12), transparent 60%),
     var(--card);
 }
+.hero-left {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
 .location {
   display: flex;
   align-items: center;
@@ -189,11 +194,43 @@ a:hover { text-decoration: underline; }
   margin-bottom: 18px;
 }
 .location h2 {
-  font-size: 1rem;
-  font-weight: 500;
+  font-size: 1.35rem;
+  font-weight: 600;
   color: var(--text);
 }
-.pin { font-size: 1rem; }
+.pin { font-size: 1.3rem; }
+.weather-alert {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  align-self: flex-start;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid;
+}
+.weather-alert.clear {
+  background: rgba(45, 212, 191, 0.1);
+  border-color: rgba(45, 212, 191, 0.35);
+  color: var(--accent-2);
+}
+.weather-alert.rain {
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: var(--accent);
+}
+.weather-alert.snow {
+  background: rgba(200, 220, 255, 0.1);
+  border-color: rgba(200, 220, 255, 0.35);
+  color: #c8dcff;
+}
+.weather-alert.storm {
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.4);
+  color: var(--accent-warm);
+}
 .hero-main {
   display: flex;
   align-items: center;
@@ -441,6 +478,52 @@ a:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   gap: 3px;
+}
+
+/* ---------- Daily Item — interactive ---------- */
+.daily-item { cursor: pointer; }
+.daily-item.selected {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.1), var(--bg-soft));
+  transform: translateY(-4px);
+}
+
+/* ---------- Day Detail Panel ---------- */
+.day-detail-card { animation: fadeIn 220ms ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+.day-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.day-detail-icon { font-size: 3.8rem; line-height: 1; }
+.day-detail-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.day-detail-desc {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.day-detail-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 24px;
+}
+.day-detail-hourly-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 12px;
 }
 
 /* ---------- Skeleton Loading ---------- */
