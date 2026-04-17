@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org; connect-src 'self' https://api.open-meteo.com; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Weather Dashboard — Nuremberg</title>
+
+  <!-- Leaflet CSS via CDN -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-mark">&#9729;</span>
+        <div class="brand-text">
+          <h1>Weather Dashboard</h1>
+          <p class="subtitle">Live-Wetter für Nürnberg, Deutschland</p>
+        </div>
+      </div>
+      <div class="header-meta">
+        <span id="last-updated" class="last-updated">Lade Daten&hellip;</span>
+        <button id="refresh-btn" class="refresh-btn" type="button" aria-label="Daten aktualisieren">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
+            <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"></path>
+          </svg>
+          <span>Aktualisieren</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Error Banner -->
+    <div id="error-banner" class="error-banner" hidden>
+      <div class="error-inner">
+        <span class="error-icon">&#9888;</span>
+        <div>
+          <strong>Datenabruf fehlgeschlagen.</strong>
+          <span id="error-message">Bitte versuche es erneut.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hero / Current Weather -->
+    <section class="hero card" id="hero-card" aria-labelledby="hero-title">
+      <div class="hero-left">
+        <div class="location">
+          <span class="pin">&#128205;</span>
+          <h2 id="hero-title">Nürnberg, DE</h2>
+        </div>
+        <div class="hero-main">
+          <div id="hero-icon" class="hero-icon skeleton-box">&nbsp;</div>
+          <div class="hero-temp-wrap">
+            <div id="hero-temp" class="hero-temp skeleton-text">--&deg;</div>
+            <div id="hero-desc" class="hero-desc skeleton-text">Lade&hellip;</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-right">
+        <div class="stat">
+          <span class="stat-label">Gefühlt</span>
+          <span id="stat-feels" class="stat-value skeleton-text">--&deg;</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Höchst / Tiefst</span>
+          <span id="stat-highlow" class="stat-value skeleton-text">-- / --</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Wind</span>
+          <span id="stat-wind" class="stat-value skeleton-text">-- km/h</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Luftfeuchte</span>
+          <span id="stat-humidity" class="stat-value skeleton-text">-- %</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">UV-Index</span>
+          <span id="stat-uv" class="stat-value skeleton-text">--</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Niederschlag</span>
+          <span id="stat-precip" class="stat-value skeleton-text">-- mm</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Middle Row: Map + Sun -->
+    <section class="row-two-col">
+      <div class="card map-card" aria-labelledby="map-title">
+        <div class="card-header">
+          <h3 id="map-title">Standort</h3>
+          <span class="card-sub">Nürnberg auf der Karte</span>
+        </div>
+        <div id="map" class="map"></div>
+      </div>
+
+      <div class="card sun-card" aria-labelledby="sun-title">
+        <div class="card-header">
+          <h3 id="sun-title">Sonnenauf- & Untergang</h3>
+          <span class="card-sub" id="sun-date">&nbsp;</span>
+        </div>
+        <div class="sun-arc-wrap">
+          <svg class="sun-arc" viewBox="0 0 300 160" aria-hidden="true">
+            <defs>
+              <linearGradient id="sunGrad" x1="0" x2="1" y1="0" y2="0">
+                <stop offset="0%" stop-color="#ffb347"/>
+                <stop offset="100%" stop-color="#ffcc70"/>
+              </linearGradient>
+            </defs>
+            <path d="M 20 140 A 130 130 0 0 1 280 140" stroke="#2a2f44" stroke-width="3" fill="none" stroke-dasharray="4 6"/>
+            <path id="sun-arc-path" d="M 20 140 A 130 130 0 0 1 280 140" stroke="url(#sunGrad)" stroke-width="4" fill="none" stroke-linecap="round"/>
+            <circle id="sun-dot" cx="20" cy="140" r="10" fill="#ffcc70" stroke="#1a1d2e" stroke-width="3"/>
+            <text x="20" y="158" text-anchor="middle" fill="#8892b0" font-size="12">Ost</text>
+            <text x="280" y="158" text-anchor="middle" fill="#8892b0" font-size="12">West</text>
+          </svg>
+        </div>
+        <div class="sun-times">
+          <div class="sun-time">
+            <span class="sun-emoji">&#127749;</span>
+            <span class="sun-label">Aufgang</span>
+            <strong id="sun-rise" class="skeleton-text">--:--</strong>
+          </div>
+          <div class="sun-time">
+            <span class="sun-emoji">&#127751;</span>
+            <span class="sun-label">Untergang</span>
+            <strong id="sun-set" class="skeleton-text">--:--</strong>
+          </div>
+          <div class="sun-time">
+            <span class="sun-emoji">&#9201;</span>
+            <span class="sun-label">Tageslänge</span>
+            <strong id="sun-duration" class="skeleton-text">-- h</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hourly Forecast -->
+    <section class="card hourly-card" aria-labelledby="hourly-title">
+      <div class="card-header">
+        <h3 id="hourly-title">Stündliche Vorhersage</h3>
+        <span class="card-sub">Heute &middot; nächste 24 Stunden</span>
+      </div>
+      <div id="hourly-strip" class="hourly-strip" role="list">
+        <!-- Filled by JS -->
+        <div class="hourly-item skeleton-box" role="listitem"></div>
+        <div class="hourly-item skeleton-box" role="listitem"></div>
+        <div class="hourly-item skeleton-box" role="listitem"></div>
+        <div class="hourly-item skeleton-box" role="listitem"></div>
+        <div class="hourly-item skeleton-box" role="listitem"></div>
+        <div class="hourly-item skeleton-box" role="listitem"></div>
+      </div>
+    </section>
+
+    <!-- 7-Day Forecast -->
+    <section class="card daily-card" aria-labelledby="daily-title">
+      <div class="card-header">
+        <h3 id="daily-title">7-Tage-Vorhersage</h3>
+        <span class="card-sub">Nürnberg</span>
+      </div>
+      <div id="daily-grid" class="daily-grid">
+        <div class="daily-item skeleton-box"></div>
+        <div class="daily-item skeleton-box"></div>
+        <div class="daily-item skeleton-box"></div>
+        <div class="daily-item skeleton-box"></div>
+        <div class="daily-item skeleton-box"></div>
+        <div class="daily-item skeleton-box"></div>
+        <div class="daily-item skeleton-box"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      Daten: <a href="https://open-meteo.com" target="_blank" rel="noopener noreferrer">Open-Meteo</a>
+      &middot; Karte: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>
+      &middot; Gebaut mit Vanilla JS
+    </p>
+  </footer>
+
+  <!-- Leaflet JS via CDN -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <!-- App scripts (order matters: helpers first, app last) -->
+  <script src="js/weather.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
