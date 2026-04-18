@@ -4,17 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="dark" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org; connect-src 'self' https://api.open-meteo.com; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://tilecache.rainviewer.com https://tile.openweathermap.org; connect-src 'self' https://api.open-meteo.com https://geocoding-api.open-meteo.com https://api.brightsky.dev https://api.rainviewer.com; font-src 'self'; object-src 'none'; base-uri 'self';">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>Weather Dashboard — Nuremberg</title>
 
-  <!-- Leaflet CSS via CDN -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-    crossorigin=""
-  />
+  <!-- Leaflet CSS (lokal vendored — kein CDN-Transfer) -->
+  <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css" />
 
   <link rel="stylesheet" href="css/style.css" />
 </head>
@@ -25,9 +20,31 @@
         <span class="brand-mark">&#9729;</span>
         <div class="brand-text">
           <h1>Weather Dashboard</h1>
-          <p class="subtitle">Live-Wetter für Nürnberg, Deutschland</p>
+          <p id="subtitle" class="subtitle">Live-Wetter für Nürnberg, DE</p>
         </div>
       </div>
+
+      <div class="search-wrapper" role="search">
+        <form id="search-form" class="search-form" aria-label="Standortsuche">
+          <input
+            id="search-input"
+            class="search-input"
+            type="search"
+            placeholder="Ort suchen&hellip;"
+            autocomplete="off"
+            aria-label="Stadt oder Ort eingeben"
+            maxlength="100"
+          />
+          <button id="search-btn" class="search-btn" type="submit" aria-label="Suchen">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="8"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+          </button>
+        </form>
+        <ul id="search-suggestions" class="search-suggestions" hidden role="listbox" aria-label="Ortsvorschläge"></ul>
+      </div>
+
       <div class="header-meta">
         <span id="last-updated" class="last-updated">Lade Daten&hellip;</span>
         <button id="refresh-btn" class="refresh-btn" type="button" aria-label="Daten aktualisieren">
@@ -86,7 +103,7 @@
           <span id="stat-wind" class="stat-value skeleton-text">-- km/h</span>
         </div>
         <div class="stat">
-          <span class="stat-label">Luftfeuchte</span>
+          <span class="stat-label">Luftfeuchtigkeit</span>
           <span id="stat-humidity" class="stat-value skeleton-text">-- %</span>
         </div>
         <div class="stat">
@@ -100,6 +117,18 @@
       </div>
     </section>
 
+    <!-- DWD Alerts Section -->
+    <section id="alerts-section" class="card alerts-card" hidden aria-live="polite" aria-label="Unwetterwarnungen">
+      <div class="card-header">
+        <div>
+          <h3>⚠️ Unwetterwarnungen</h3>
+          <span class="card-sub">Offizielle DWD-Warnungen für Nürnberg</span>
+        </div>
+        <span id="alerts-count" class="alerts-count-badge"></span>
+      </div>
+      <div id="alerts-list" class="alerts-list"></div>
+    </section>
+
     <!-- Middle Row: Map + Sun -->
     <section class="row-two-col">
       <div class="card map-card" aria-labelledby="map-title">
@@ -107,7 +136,36 @@
           <h3 id="map-title">Standort</h3>
           <span class="card-sub">Nürnberg auf der Karte</span>
         </div>
-        <div id="map" class="map"></div>
+        <div class="map-wrap">
+          <div id="map" class="map"></div>
+          <button id="map-cloud-btn" class="map-cloud-btn" type="button" aria-label="Wolken dimmen" data-state="0">
+            <svg width="15" height="11" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M17 13H5a4 4 0 0 1-.5-7.95A5.5 5.5 0 1 1 17 13z"/>
+            </svg>
+          </button>
+          <button id="map-radar-btn" class="map-radar-btn" type="button" aria-label="Niederschlag dimmen" data-state="0">
+            <svg width="15" height="13" viewBox="0 0 20 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M17 11H5a4 4 0 0 1-.5-7.95A5.5 5.5 0 1 1 17 11z"/>
+              <line x1="7" y1="15" x2="6" y2="17"/>
+              <line x1="11" y1="15" x2="10" y2="17"/>
+              <line x1="15" y1="15" x2="14" y2="17"/>
+            </svg>
+          </button>
+          <button id="map-expand-btn" class="map-expand-btn" type="button" aria-label="Karte maximieren" aria-expanded="false">
+            <svg class="icon-expand" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="5,1 1,1 1,5"/>
+              <polyline points="9,1 13,1 13,5"/>
+              <polyline points="13,9 13,13 9,13"/>
+              <polyline points="5,13 1,13 1,9"/>
+            </svg>
+            <svg class="icon-collapse" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="1,5 5,5 5,1"/>
+              <polyline points="9,1 9,5 13,5"/>
+              <polyline points="13,9 9,9 9,13"/>
+              <polyline points="1,9 5,9 5,13"/>
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div class="card sun-card" aria-labelledby="sun-title">
@@ -153,8 +211,27 @@
     <!-- Hourly Forecast -->
     <section class="card hourly-card" aria-labelledby="hourly-title">
       <div class="card-header">
-        <h3 id="hourly-title">Stündliche Vorhersage</h3>
-        <span class="card-sub">Heute &middot; nächste 24 Stunden</span>
+        <div>
+          <h3 id="hourly-title">Stündliche Vorhersage</h3>
+          <span class="card-sub">Heute &middot; nächste 24 Stunden</span>
+        </div>
+        <div class="view-switch" role="group" aria-label="Ansicht wählen">
+          <button id="btn-tiles" class="view-switch-btn active" aria-pressed="true" type="button">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+              <rect x="0" y="0" width="6" height="6" rx="1.5"/>
+              <rect x="8" y="0" width="6" height="6" rx="1.5"/>
+              <rect x="0" y="8" width="6" height="6" rx="1.5"/>
+              <rect x="8" y="8" width="6" height="6" rx="1.5"/>
+            </svg>
+            Kacheln
+          </button>
+          <button id="btn-chart" class="view-switch-btn" aria-pressed="false" type="button">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="1,11 4,7 7,9 10,4 13,6"/>
+            </svg>
+            Chart
+          </button>
+        </div>
       </div>
       <div id="hourly-strip" class="hourly-strip" role="list">
         <!-- Filled by JS -->
@@ -165,6 +242,7 @@
         <div class="hourly-item skeleton-box" role="listitem"></div>
         <div class="hourly-item skeleton-box" role="listitem"></div>
       </div>
+      <div id="hourly-chart" class="hourly-chart" hidden></div>
     </section>
 
     <!-- 7-Day Forecast -->
@@ -192,19 +270,22 @@
   <footer class="site-footer">
     <p>
       Daten: <a href="https://open-meteo.com" target="_blank" rel="noopener noreferrer">Open-Meteo</a>
+      (Modell: <a href="https://www.dwd.de/DE/leistungen/nwp_icon_global/nwp_icon_global.html" target="_blank" rel="noopener noreferrer">DWD ICON</a>)
+      &middot; Warnungen: <a href="https://brightsky.dev" target="_blank" rel="noopener noreferrer">Bright Sky</a>
+      (Quelle: <a href="https://www.dwd.de" target="_blank" rel="noopener noreferrer">DWD</a>)
       &middot; Karte: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>
       &middot; Gebaut mit Vanilla JS
     </p>
+    <p class="footer-privacy">
+      Datenschutz: Deine IP-Adresse wird beim Abrufen von Wetterdaten an Open-Meteo (Server: Deutschland) und Bright Sky/DWD (Server: Deutschland) sowie f&uuml;r die Kartenansicht an OpenStreetMap (UK &ndash; EU-Angemessenheitsbeschluss) &uuml;bertragen. Es werden keine personenbezogenen Daten gespeichert.
+    </p>
   </footer>
 
-  <!-- Leaflet JS via CDN -->
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""
-  ></script>
+  <!-- Leaflet JS (lokal vendored — kein CDN-Transfer) -->
+  <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
 
   <!-- App scripts (order matters: helpers first, app last) -->
+  <script src="js/config.js"></script>
   <script src="js/weather.js"></script>
   <script src="js/map.js"></script>
   <script src="js/ui.js"></script>

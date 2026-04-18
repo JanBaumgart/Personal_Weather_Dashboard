@@ -66,6 +66,11 @@
     const statUv      = document.getElementById('stat-uv');
     const statPrecip  = document.getElementById('stat-precip');
 
+    const heroTitle = document.getElementById('hero-title');
+    if (heroTitle && data.location) {
+      heroTitle.textContent = data.location.name + ', ' + data.location.country;
+    }
+
     heroIcon.textContent = c.description.icon;
     heroTemp.textContent = round(c.temperature) + '\u00B0';
     heroDesc.textContent = c.description.label;
@@ -462,6 +467,328 @@
     });
   }
 
+  // ---------- Hourly View Toggle ----------
+  function initHourlyToggle() {
+    var btnTiles = document.getElementById('btn-tiles');
+    var btnChart = document.getElementById('btn-chart');
+    var strip    = document.getElementById('hourly-strip');
+    var chart    = document.getElementById('hourly-chart');
+    if (!btnTiles || !btnChart || !strip || !chart) return;
+
+    function activate(showChart) {
+      btnTiles.classList.toggle('active', !showChart);
+      btnTiles.setAttribute('aria-pressed', String(!showChart));
+      btnChart.classList.toggle('active', showChart);
+      btnChart.setAttribute('aria-pressed', String(showChart));
+      strip.hidden = showChart;
+      chart.hidden = !showChart;
+    }
+
+    btnTiles.addEventListener('click', function () { activate(false); });
+    btnChart.addEventListener('click', function () { activate(true); });
+  }
+
+  // ---------- Temperature Chart ----------
+  function getHourlySlice(data) {
+    if (!data.hourly || !data.hourly.length) return [];
+    var now = new Date();
+    var startIdx = 0;
+    for (var i = 0; i < data.hourly.length; i++) {
+      if (data.hourly[i].time.getTime() >= now.getTime() - 30 * 60 * 1000) {
+        startIdx = i;
+        break;
+      }
+    }
+    return data.hourly.slice(startIdx, Math.min(startIdx + 24, data.hourly.length));
+  }
+
+  function renderTempChart(data) {
+    var container = document.getElementById('hourly-chart');
+    if (!container) return;
+
+    var slice = getHourlySlice(data);
+    if (slice.length < 2) {
+      clearChildren(container);
+      return;
+    }
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var W = 760, H = 200;
+    var padL = 52, padR = 16, padT = 32, padB = 50;
+    var plotW = W - padL - padR;
+    var plotH = H - padT - padB;
+    var n = slice.length;
+
+    var temps   = slice.map(function (h) { return h.temperature; });
+    var tRawMin = Math.min.apply(null, temps);
+    var tRawMax = Math.max.apply(null, temps);
+    var tPad    = Math.max(2, (tRawMax - tRawMin) * 0.25);
+    var tMin    = tRawMin - tPad;
+    var tMax    = tRawMax + tPad;
+    var tRange  = tMax - tMin || 1;
+
+    function xOf(i) { return padL + (i / (n - 1)) * plotW; }
+    function yOf(t) { return padT + (1 - (t - tMin) / tRange) * plotH; }
+
+    var pts = slice.map(function (h, i) { return { x: xOf(i), y: yOf(h.temperature) }; });
+
+    // Catmull-Rom → cubic Bézier for smooth curve
+    function buildPath(points) {
+      var d = 'M ' + points[0].x.toFixed(1) + ',' + points[0].y.toFixed(1);
+      for (var i = 1; i < points.length; i++) {
+        var p0  = points[Math.max(0, i - 2)];
+        var p1  = points[i - 1];
+        var p2  = points[i];
+        var p3  = points[Math.min(points.length - 1, i + 1)];
+        var cp1x = p1.x + (p2.x - p0.x) / 6;
+        var cp1y = p1.y + (p2.y - p0.y) / 6;
+        var cp2x = p2.x - (p3.x - p1.x) / 6;
+        var cp2y = p2.y - (p3.y - p1.y) / 6;
+        d += ' C ' + cp1x.toFixed(1) + ',' + cp1y.toFixed(1)
+           + ' '   + cp2x.toFixed(1) + ',' + cp2y.toFixed(1)
+           + ' '   + p2.x.toFixed(1) + ',' + p2.y.toFixed(1);
+      }
+      return d;
+    }
+
+    var linePath = buildPath(pts);
+    var lastPt   = pts[pts.length - 1];
+    var bottomY  = padT + plotH;
+    var areaPath = linePath
+      + ' L ' + lastPt.x.toFixed(1) + ',' + bottomY
+      + ' L ' + pts[0].x.toFixed(1) + ',' + bottomY + ' Z';
+
+    function svgEl(tag) { return document.createElementNS(NS, tag); }
+    function setAttrs(elem, attrs) {
+      Object.keys(attrs).forEach(function (k) { elem.setAttribute(k, attrs[k]); });
+      return elem;
+    }
+
+    var svg = setAttrs(svgEl('svg'), {
+      viewBox: '0 0 ' + W + ' ' + H,
+      'class': 'temp-chart-svg',
+      'aria-hidden': 'true'
+    });
+
+    // Gradient defs
+    var defs    = svgEl('defs');
+    var lineGrd = setAttrs(svgEl('linearGradient'), { id: 'tcLine', x1: '0', x2: '1', y1: '0', y2: '0' });
+    lineGrd.appendChild(setAttrs(svgEl('stop'), { offset: '0%',   'stop-color': '#38bdf8' }));
+    lineGrd.appendChild(setAttrs(svgEl('stop'), { offset: '100%', 'stop-color': '#2dd4bf' }));
+    var areaGrd = setAttrs(svgEl('linearGradient'), { id: 'tcArea', x1: '0', x2: '0', y1: '0', y2: '1' });
+    areaGrd.appendChild(setAttrs(svgEl('stop'), { offset: '0%',   'stop-color': '#38bdf8', 'stop-opacity': '0.22' }));
+    areaGrd.appendChild(setAttrs(svgEl('stop'), { offset: '100%', 'stop-color': '#38bdf8', 'stop-opacity': '0.02' }));
+    defs.appendChild(lineGrd);
+    defs.appendChild(areaGrd);
+    svg.appendChild(defs);
+
+    // Horizontal grid lines
+    var gridStep  = Math.max(1, Math.ceil((tRawMax - tRawMin + 4) / 4));
+    var gridStart = Math.floor(tMin / gridStep) * gridStep;
+    for (var gt = gridStart; gt <= tMax + 0.5; gt += gridStep) {
+      if (gt < tMin - 0.5 || gt > tMax + 0.5) continue;
+      var gy = yOf(gt);
+      svg.appendChild(setAttrs(svgEl('line'), {
+        x1: padL, x2: W - padR, y1: gy, y2: gy,
+        stroke: '#252a40', 'stroke-width': '1'
+      }));
+      var yLbl = setAttrs(svgEl('text'), {
+        x: padL - 20, y: gy + 4,
+        'text-anchor': 'end', fill: '#5b6178', 'font-size': '11'
+      });
+      yLbl.textContent = Math.round(gt) + '\u00B0';
+      svg.appendChild(yLbl);
+    }
+
+    // Area fill
+    svg.appendChild(setAttrs(svgEl('path'), { d: areaPath, fill: 'url(#tcArea)' }));
+
+    // Precipitation bars
+    var barAreaH = 14;
+    var barAreaY = H - padB + 20;
+    var barW     = Math.max(2, (plotW / n) - 2);
+    slice.forEach(function (h, i) {
+      var p = h.precipitationProbability || 0;
+      if (p < 5) return;
+      var bh = (p / 100) * barAreaH;
+      var bx = padL + (i / n) * plotW;
+      svg.appendChild(setAttrs(svgEl('rect'), {
+        x: bx.toFixed(1), y: (barAreaY + barAreaH - bh).toFixed(1),
+        width: barW.toFixed(1), height: bh.toFixed(1),
+        fill: 'rgba(56,189,248,0.28)', rx: '2'
+      }));
+    });
+
+    // Smooth line
+    svg.appendChild(setAttrs(svgEl('path'), {
+      d: linePath, fill: 'none',
+      stroke: 'url(#tcLine)', 'stroke-width': '2.5',
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round'
+    }));
+
+    // Dots + labels every 3 h
+    slice.forEach(function (h, i) {
+      var px = pts[i].x, py = pts[i].y;
+      var isNow     = i === 0;
+      var showLabel = isNow || i % 3 === 0;
+
+      svg.appendChild(setAttrs(svgEl('circle'), {
+        cx: px.toFixed(1), cy: py.toFixed(1), r: showLabel ? '4' : '2.5',
+        fill: isNow ? '#38bdf8' : '#2dd4bf',
+        stroke: '#1a1d2e', 'stroke-width': '2'
+      }));
+
+      if (showLabel) {
+        var tLbl = setAttrs(svgEl('text'), {
+          x: px.toFixed(1), y: (py - 12).toFixed(1),
+          'text-anchor': 'middle', fill: '#e6e9f2',
+          'font-size': '10', 'font-weight': '600'
+        });
+        tLbl.textContent = Math.round(h.temperature) + '\u00B0';
+        svg.appendChild(tLbl);
+
+        var timeLbl = setAttrs(svgEl('text'), {
+          x: px.toFixed(1), y: (barAreaY - 4).toFixed(1),
+          'text-anchor': 'middle',
+          fill: isNow ? '#38bdf8' : '#8892b0',
+          'font-size': '11',
+          'font-weight': isNow ? '600' : '400'
+        });
+        timeLbl.textContent = isNow ? 'Jetzt' : hourFmt.format(h.time);
+        svg.appendChild(timeLbl);
+      }
+    });
+
+    clearChildren(container);
+    container.appendChild(svg);
+  }
+
+  // ---------- Alerts ----------
+  var SEVERITY_META = {
+    minor:    { label: 'Gering',  icon: '⚠️',  cls: 'severity-minor'    },
+    moderate: { label: 'Mäßig',  icon: '🌩️', cls: 'severity-moderate' },
+    severe:   { label: 'Schwer', icon: '⛈️',  cls: 'severity-severe'   },
+    extreme:  { label: 'Extrem', icon: '🚨',  cls: 'severity-extreme'  }
+  };
+
+  var SEVERITY_ORDER = { minor: 0, moderate: 1, severe: 2, extreme: 3 };
+
+  function renderAlerts(alerts) {
+    var section = document.getElementById('alerts-section');
+    var listEl  = document.getElementById('alerts-list');
+    var countEl = document.getElementById('alerts-count');
+    var alertEl = document.getElementById('weather-alert');
+
+    if (!section || !listEl) return;
+
+    if (!alerts || !alerts.length) {
+      section.hidden = true;
+      return;
+    }
+
+    section.hidden = false;
+
+    if (countEl) {
+      countEl.textContent = alerts.length + ' aktiv';
+    }
+
+    // Override hero pill with highest-severity DWD alert state
+    if (alertEl) {
+      var highest = alerts.reduce(function (acc, a) {
+        return (SEVERITY_ORDER[a.severity] || 0) > (SEVERITY_ORDER[acc.severity] || 0) ? a : acc;
+      }, alerts[0]);
+      var pillMeta = SEVERITY_META[highest.severity] || SEVERITY_META.minor;
+      alertEl.className = 'weather-alert dwd-' + highest.severity;
+      alertEl.textContent = pillMeta.icon + ' ' + alerts.length
+        + ' DWD-Warnung' + (alerts.length > 1 ? 'en' : '') + ' aktiv';
+      alertEl.hidden = false;
+    }
+
+    var frag = document.createDocumentFragment();
+    alerts.forEach(function (a) {
+      var meta = SEVERITY_META[a.severity] || SEVERITY_META.minor;
+
+      var item = document.createElement('div');
+      item.className = 'alert-item ' + meta.cls;
+
+      var bar = document.createElement('div');
+      bar.className = 'alert-bar';
+
+      var body = document.createElement('div');
+      body.className = 'alert-body';
+
+      // Header row: icon + title + badge
+      var head = document.createElement('div');
+      head.className = 'alert-head';
+
+      var iconEl = document.createElement('span');
+      iconEl.className = 'alert-icon';
+      iconEl.setAttribute('aria-hidden', 'true');
+      iconEl.textContent = meta.icon;
+
+      var titleEl = document.createElement('span');
+      titleEl.className = 'alert-title';
+      titleEl.textContent = a.headline || a.event || 'Unwetterwarnung';
+
+      var badge = document.createElement('span');
+      badge.className = 'alert-badge';
+      badge.textContent = meta.label;
+
+      head.appendChild(iconEl);
+      head.appendChild(titleEl);
+      head.appendChild(badge);
+
+      // Time row
+      var timeEl = document.createElement('div');
+      timeEl.className = 'alert-time';
+      if (a.onset && a.expires) {
+        var onsetDate   = berlinDateFmt.format(a.onset);
+        var expiresDate = berlinDateFmt.format(a.expires);
+        if (onsetDate === expiresDate) {
+          timeEl.textContent = 'Gültig ' + hourFmt.format(a.onset)
+            + ' – ' + hourFmt.format(a.expires) + ' Uhr';
+        } else {
+          timeEl.textContent = 'Von ' + dateShortFmt.format(a.onset) + ' '
+            + hourFmt.format(a.onset) + ' bis ' + dateShortFmt.format(a.expires)
+            + ' ' + hourFmt.format(a.expires) + ' Uhr';
+        }
+      } else if (a.expires) {
+        timeEl.textContent = 'Bis ' + hourFmt.format(a.expires) + ' Uhr';
+      }
+
+      body.appendChild(head);
+      body.appendChild(timeEl);
+
+      // Description + tap-to-expand
+      if (a.description) {
+        var desc = document.createElement('p');
+        desc.className = 'alert-desc';
+        desc.textContent = a.description;
+        body.appendChild(desc);
+        item.setAttribute('role', 'button');
+        item.setAttribute('tabindex', '0');
+        item.setAttribute('aria-expanded', 'false');
+        item.addEventListener('click', function () {
+          var expanded = item.classList.toggle('expanded');
+          item.setAttribute('aria-expanded', String(expanded));
+        });
+        item.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            item.click();
+          }
+        });
+      }
+
+      item.appendChild(bar);
+      item.appendChild(body);
+      frag.appendChild(item);
+    });
+
+    clearChildren(listEl);
+    listEl.appendChild(frag);
+  }
+
   // ---------- Header / status ----------
   function renderUpdatedAt(date) {
     const el = document.getElementById('last-updated');
@@ -491,15 +818,18 @@
   }
 
   window.WeatherUI = {
-    renderHero:      renderHero,
-    renderSun:       renderSun,
-    renderHourly:    renderHourly,
-    renderDaily:     renderDaily,
-    renderDayDetail: renderDayDetail,
-    hideDayDetail:   hideDayDetail,
-    renderUpdatedAt: renderUpdatedAt,
-    showError:       showError,
-    hideError:       hideError,
-    setRefreshing:   setRefreshing
+    renderHero:        renderHero,
+    renderSun:         renderSun,
+    renderHourly:      renderHourly,
+    renderTempChart:   renderTempChart,
+    initHourlyToggle:  initHourlyToggle,
+    renderDaily:       renderDaily,
+    renderDayDetail:   renderDayDetail,
+    hideDayDetail:     hideDayDetail,
+    renderAlerts:      renderAlerts,
+    renderUpdatedAt:   renderUpdatedAt,
+    showError:         showError,
+    hideError:         hideError,
+    setRefreshing:     setRefreshing
   };
 })();

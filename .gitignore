@@ -10,3 +10,9 @@ Thumbs.db
 # Environment
 .env
 .env.*
+
+# Lokale API-Keys — nie committen
+js/config.js
+
+# Debug-Screenshots (temporär)
+*.png

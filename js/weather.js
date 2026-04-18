@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  const LOCATION = {
+  const DEFAULT_LOCATION = {
     name: 'Nürnberg',
     country: 'DE',
     lat: 49.45,
@@ -15,17 +15,37 @@
     timezone: 'Europe/Berlin'
   };
 
-  // URL built from LOCATION so coordinates aren't duplicated.
-  // timeformat=unixtime avoids timezone-naive ISO strings entirely.
-  const API_URL =
-    'https://api.open-meteo.com/v1/forecast' +
-    '?latitude=' + LOCATION.lat + '&longitude=' + LOCATION.lon +
-    '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,apparent_temperature,precipitation,weather_code,uv_index' +
-    '&daily=temperature_2m_max,temperature_2m_min,weather_code,sunrise,sunset,uv_index_max,precipitation_sum' +
-    '&hourly=temperature_2m,weather_code,precipitation_probability' +
-    '&timezone=Europe%2FBerlin' +
-    '&timeformat=unixtime' +
-    '&forecast_days=7';
+  let activeLocation = Object.assign({}, DEFAULT_LOCATION);
+
+  function buildApiUrl(loc) {
+    return 'https://api.open-meteo.com/v1/forecast' +
+      '?latitude='  + loc.lat + '&longitude=' + loc.lon +
+      '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,apparent_temperature,precipitation,weather_code,uv_index' +
+      '&daily=temperature_2m_max,temperature_2m_min,weather_code,sunrise,sunset,uv_index_max,precipitation_sum' +
+      '&hourly=temperature_2m,weather_code,precipitation_probability' +
+      '&timezone=' + encodeURIComponent(loc.timezone || 'Europe/Berlin') +
+      '&timeformat=unixtime' +
+      '&forecast_days=7' +
+      '&models=icon_seamless';
+  }
+
+  function buildAlertsUrl(loc) {
+    return 'https://api.brightsky.dev/alerts?lat=' + loc.lat + '&lon=' + loc.lon;
+  }
+
+  function setLocation(loc) {
+    activeLocation = {
+      name:     String(loc.name    || '').slice(0, 100),
+      country:  String(loc.country || '').slice(0, 10),
+      lat:      Number(loc.lat),
+      lon:      Number(loc.lon),
+      timezone: String(loc.timezone || 'Europe/Berlin').slice(0, 50)
+    };
+  }
+
+  function getLocation() {
+    return Object.assign({}, activeLocation);
+  }
 
   /**
    * Map WMO weather codes to human-readable labels and emoji icons.
@@ -69,16 +89,78 @@
     return { label: 'Unbekannt', icon: '❓' };
   }
 
-  async function fetchWeather() {
-    const response = await fetch(API_URL);
+  const VALID_SEVERITIES = new Set(['minor', 'moderate', 'severe', 'extreme']);
+
+  function safeParseDate(str) {
+    if (typeof str !== 'string') return null;
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function trimStr(s, max) {
+    return typeof s === 'string' ? s.slice(0, max) : '';
+  }
+
+  function fetchWithTimeout(url, ms) {
+    const ctrl = new AbortController();
+    const t = setTimeout(function () { ctrl.abort(); }, ms);
+    return fetch(url, { signal: ctrl.signal }).finally(function () { clearTimeout(t); });
+  }
+
+  async function geocode(query) {
+    const q = String(query).trim().slice(0, 100);
+    if (!q) return [];
+    const url = 'https://geocoding-api.open-meteo.com/v1/search?name=' +
+      encodeURIComponent(q) + '&count=5&language=de&format=json';
+    const resp = await fetchWithTimeout(url, 10000);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
+    const data = await resp.json();
+    return (data.results || []).map(function (r) {
+      const parts = [String(r.name || '').slice(0, 100)];
+      if (r.admin1) parts.push(String(r.admin1).slice(0, 100));
+      parts.push(String(r.country || r.country_code || '').slice(0, 60));
+      return {
+        name:        String(r.name        || '').slice(0, 100),
+        country:     String(r.country_code || '').slice(0, 10),
+        admin1:      String(r.admin1       || '').slice(0, 100),
+        lat:         Number(r.latitude),
+        lon:         Number(r.longitude),
+        timezone:    String(r.timezone     || 'GMT').slice(0, 50),
+        displayName: parts.join(', ')
+      };
+    });
+  }
+
+  async function fetchAlerts() {
+    const response = await fetchWithTimeout(buildAlertsUrl(activeLocation), 15000);
     if (!response.ok) {
       throw new Error('HTTP ' + response.status + ' ' + response.statusText);
     }
     const data = await response.json();
-    return parseWeather(data);
+    return (data.alerts || []).map(function (a) {
+      const sev = typeof a.severity === 'string' ? a.severity.toLowerCase() : 'minor';
+      return {
+        id:          a.id,
+        severity:    VALID_SEVERITIES.has(sev) ? sev : 'minor',
+        event:       trimStr(a.event_de   || a.event_en,   100),
+        headline:    trimStr(a.headline_de || a.headline_en, 500),
+        description: trimStr(a.description_de || a.description_en, 2000),
+        instruction: trimStr(a.instruction_de || a.instruction_en, 2000),
+        onset:       safeParseDate(a.onset),
+        expires:     safeParseDate(a.expires)
+      };
+    });
   }
 
-  function parseWeather(raw) {
+  async function fetchWeather() {
+    const loc      = activeLocation;
+    const response = await fetchWithTimeout(buildApiUrl(loc), 15000);
+    if (!response.ok) throw new Error('HTTP ' + response.status + ' ' + response.statusText);
+    const data = await response.json();
+    return parseWeather(data, loc);
+  }
+
+  function parseWeather(raw, loc) {
     const c = raw.current || {};
     const d = raw.daily   || {};
     const h = raw.hourly  || {};
@@ -139,7 +221,7 @@
     });
 
     return {
-      location: LOCATION,
+      location: loc || activeLocation,
       units: {
         temperature: (raw.current_units && raw.current_units.temperature_2m) || '°C',
         wind:        (raw.current_units && raw.current_units.wind_speed_10m)  || 'km/h',
@@ -154,8 +236,12 @@
   }
 
   window.WeatherAPI = {
-    LOCATION:        LOCATION,
-    fetchWeather:    fetchWeather,
-    describeWeather: describeWeather
+    DEFAULT_LOCATION: DEFAULT_LOCATION,
+    getLocation:      getLocation,
+    setLocation:      setLocation,
+    fetchWeather:     fetchWeather,
+    fetchAlerts:      fetchAlerts,
+    describeWeather:  describeWeather,
+    geocode:          geocode
   };
 })();
