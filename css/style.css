@@ -493,6 +493,16 @@ a:hover { text-decoration: underline; }
   color: var(--text-muted) !important;
 }
 .leaflet-control-attribution a { color: var(--accent) !important; }
+.leaflet-control-scale-line {
+  background: rgba(15, 17, 23, 0.82) !important;
+  border-color: rgba(56, 189, 248, 0.5) !important;
+  color: #ffffff !important;
+  font-size: 0.75rem !important;
+  padding: 3px 8px !important;
+  min-width: 80px !important;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
 /* Custom Marker */
 .weather-marker {
   width: 40px;

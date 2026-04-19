@@ -14,5 +14,13 @@ Thumbs.db
 # Lokale API-Keys — nie committen
 js/config.js
 
-# Debug-Screenshots (temporär)
-*.png
+.vercel
+
+# Secrets catch-all — never commit credentials
+*.pem
+*.key
+*.p12
+id_rsa*
+secrets.json
+secrets.*.json
+credentials*.json
