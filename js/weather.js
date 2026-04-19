@@ -17,6 +17,17 @@
 
   let activeLocation = Object.assign({}, DEFAULT_LOCATION);
 
+  /**
+   * Validate a numeric coordinate: must be finite and within [min, max].
+   * Throws on invalid input so callers fail loudly instead of propagating NaN
+   * into Leaflet (setView(NaN, NaN) crashes) or building malformed API URLs.
+   */
+  function clampCoord(v, min, max, label) {
+    var n = Number(v);
+    if (!isFinite(n) || n < min || n > max) throw new Error('Invalid coord ' + label + ': ' + v);
+    return n;
+  }
+
   function buildApiUrl(loc) {
     return 'https://api.open-meteo.com/v1/forecast' +
       '?latitude='  + loc.lat + '&longitude=' + loc.lon +
@@ -37,8 +48,8 @@
     activeLocation = {
       name:     String(loc.name    || '').slice(0, 100),
       country:  String(loc.country || '').slice(0, 10),
-      lat:      Number(loc.lat),
-      lon:      Number(loc.lon),
+      lat:      clampCoord(loc.lat, -90, 90, 'lat'),
+      lon:      clampCoord(loc.lon, -180, 180, 'lon'),
       timezone: String(loc.timezone || 'Europe/Berlin').slice(0, 50)
     };
   }
@@ -115,20 +126,30 @@
     const resp = await fetchWithTimeout(url, 10000);
     if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
     const data = await resp.json();
-    return (data.results || []).map(function (r) {
+    return (data.results || []).reduce(function (acc, r) {
+      var lat, lon;
+      try {
+        lat = clampCoord(r.latitude,  -90,  90, 'lat');
+        lon = clampCoord(r.longitude, -180, 180, 'lon');
+      } catch (e) {
+        // Skip results with corrupt coordinates instead of crashing the whole list.
+        if (window.console) console.warn('[WeatherAPI] geocode: dropped invalid result', e);
+        return acc;
+      }
       const parts = [String(r.name || '').slice(0, 100)];
       if (r.admin1) parts.push(String(r.admin1).slice(0, 100));
       parts.push(String(r.country || r.country_code || '').slice(0, 60));
-      return {
+      acc.push({
         name:        String(r.name        || '').slice(0, 100),
         country:     String(r.country_code || '').slice(0, 10),
         admin1:      String(r.admin1       || '').slice(0, 100),
-        lat:         Number(r.latitude),
-        lon:         Number(r.longitude),
+        lat:         lat,
+        lon:         lon,
         timezone:    String(r.timezone     || 'GMT').slice(0, 50),
         displayName: parts.join(', ')
-      };
-    });
+      });
+      return acc;
+    }, []);
   }
 
   async function fetchAlerts() {

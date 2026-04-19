@@ -191,38 +191,10 @@
     return host + path + '/256/{z}/{x}/{y}/2/1_1.png';
   }
 
-  function _isRadarErrorTile(img) {
-    try {
-      if (!img || !img.complete || !img.naturalWidth) return false;
-      var w = img.naturalWidth || 256, h = img.naturalHeight || 256;
-      var canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      var ctx = canvas.getContext('2d');
-      if (!ctx) return false;
-      ctx.drawImage(img, 0, 0);
-      var step = 8, data = ctx.getImageData(0, 0, w, h).data;
-      var visibleGrey = 0, saturated = 0, visibleTotal = 0, total = 0;
-      for (var y = 0; y < h; y += step) {
-        for (var x = 0; x < w; x += step) {
-          var i = (y * w + x) * 4;
-          var r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
-          total++;
-          if (a < 20) continue;
-          visibleTotal++;
-          var maxc = Math.max(r,g,b), minc = Math.min(r,g,b);
-          if (maxc - minc <= 16) visibleGrey++;
-          else if (maxc - minc >= 40) saturated++;
-        }
-      }
-      if (visibleTotal === 0) return false;
-      if (saturated > 0) return false;
-      return (visibleTotal / total) >= 0.3 && (visibleGrey / visibleTotal) >= 0.7;
-    } catch (e) {
-      if (window.console) console.warn('[WeatherMap] canvas tainted:', e);
-      return true;
-    }
-  }
-
+  // NOTE: Canvas/getImageData-based error-tile detection was removed intentionally —
+  // CORS caching inconsistencies caused false positives regardless of heuristic tuning.
+  // The reliable fix is `maxNativeZoom: 7` on the radar layer (see _startOrRefresh).
+  // This probe now only verifies HTTP availability of a reference tile.
   function _probeRadarTile(tileUrlTemplate) {
     return new Promise(function (resolve, reject) {
       var url = tileUrlTemplate
@@ -231,10 +203,9 @@
         .replace('{y}', String(SAMPLE_TILE_Y))
         + '?_=' + Date.now();
       var img = new Image();
-      img.crossOrigin = 'anonymous';
       var done = false;
       var timeout = setTimeout(function () { if (!done) { done = true; reject(new Error('probe timeout')); } }, 6000);
-      img.onload  = function () { if (!done) { done = true; clearTimeout(timeout); resolve(!_isRadarErrorTile(img)); } };
+      img.onload  = function () { if (!done) { done = true; clearTimeout(timeout); resolve(true); } };
       img.onerror = function () { if (!done) { done = true; clearTimeout(timeout); reject(new Error('probe load failed')); } };
       img.src = url;
     });

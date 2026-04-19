@@ -16,20 +16,40 @@
   const FAV_KEY = 'weather_favorites';
   const FAV_MAX = 8;
 
+  /**
+   * Validate a favorite entry's shape before trusting it.
+   * localStorage is writable by other tabs / devtools / malicious extensions — a
+   * corrupt entry with non-numeric lat/lon would propagate NaN into Leaflet and
+   * into API URLs, so we filter aggressively on load.
+   */
+  function _isValidFavorite(f) {
+    return f && typeof f === 'object'
+      && typeof f.name === 'string' && f.name.length > 0 && f.name.length <= 100
+      && typeof f.country === 'string' && f.country.length <= 10
+      && typeof f.lat === 'number' && isFinite(f.lat) && f.lat >= -90 && f.lat <= 90
+      && typeof f.lon === 'number' && isFinite(f.lon) && f.lon >= -180 && f.lon <= 180;
+  }
+
+  function _sameLoc(a, b) {
+    return Math.abs(a.lat - b.lat) < 0.01 && Math.abs(a.lon - b.lon) < 0.01;
+  }
+
   function loadFavorites() {
-    try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch (e) { return []; }
+    try {
+      var raw = JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
+      if (!Array.isArray(raw)) return [];
+      return raw.filter(_isValidFavorite);
+    } catch (e) { return []; }
   }
   function _saveFavorites(list) {
     try { localStorage.setItem(FAV_KEY, JSON.stringify(list)); } catch (e) { /* quota */ }
   }
   function isFavorite(loc) {
-    return loadFavorites().some(function (f) {
-      return Math.abs(f.lat - loc.lat) < 0.01 && Math.abs(f.lon - loc.lon) < 0.01;
-    });
+    return loadFavorites().some(function (f) { return _sameLoc(f, loc); });
   }
   function addFavorite(loc) {
     var list = loadFavorites();
-    if (list.some(function (f) { return Math.abs(f.lat - loc.lat) < 0.01 && Math.abs(f.lon - loc.lon) < 0.01; })) return;
+    if (list.some(function (f) { return _sameLoc(f, loc); })) return;
     var displayName = loc.displayName || (loc.name + ', ' + loc.country);
     list.push({ name: loc.name, country: loc.country, lat: loc.lat, lon: loc.lon, timezone: loc.timezone || 'Europe/Berlin', displayName: displayName });
     list.sort(function (a, b) { return a.name.localeCompare(b.name, 'de'); });
@@ -37,14 +57,30 @@
     _saveFavorites(list);
   }
   function removeFavorite(loc) {
-    var list = loadFavorites().filter(function (f) {
-      return !(Math.abs(f.lat - loc.lat) < 0.01 && Math.abs(f.lon - loc.lon) < 0.01);
-    });
+    var list = loadFavorites().filter(function (f) { return !_sameLoc(f, loc); });
     _saveFavorites(list);
   }
+  /**
+   * Read localStorage only once per toggle (previously: isFavorite + add/remove = 2 reads).
+   * Mutates an in-memory list and persists once at the end.
+   */
   function toggleFavorite(loc) {
-    if (isFavorite(loc)) { removeFavorite(loc); return false; }
-    addFavorite(loc); return true;
+    var list  = loadFavorites();
+    var idx   = -1;
+    for (var i = 0; i < list.length; i++) {
+      if (_sameLoc(list[i], loc)) { idx = i; break; }
+    }
+    if (idx >= 0) {
+      list.splice(idx, 1);
+      _saveFavorites(list);
+      return false;
+    }
+    var displayName = loc.displayName || (loc.name + ', ' + loc.country);
+    list.push({ name: loc.name, country: loc.country, lat: loc.lat, lon: loc.lon, timezone: loc.timezone || 'Europe/Berlin', displayName: displayName });
+    list.sort(function (a, b) { return a.name.localeCompare(b.name, 'de'); });
+    if (list.length > FAV_MAX) list = list.slice(0, FAV_MAX);
+    _saveFavorites(list);
+    return true;
   }
 
   function updateSubtitleStar() {

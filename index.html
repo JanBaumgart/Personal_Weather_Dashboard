@@ -8,8 +8,10 @@
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>Weather Dashboard — Nuremberg</title>
 
-  <!-- Leaflet CSS (lokal vendored — kein CDN-Transfer) -->
-  <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css" />
+  <!-- Leaflet CSS (lokal vendored — kein CDN-Transfer). SRI schützt vor manipulierter Datei (z.B. kompromittiertes Git). -->
+  <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css"
+        integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
+        crossorigin="anonymous" />
 
   <link rel="stylesheet" href="css/style.css" />
 </head>
@@ -287,8 +289,10 @@
     </p>
   </footer>
 
-  <!-- Leaflet JS (lokal vendored — kein CDN-Transfer) -->
-  <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
+  <!-- Leaflet JS (lokal vendored — kein CDN-Transfer). SRI schützt vor manipulierter Datei. -->
+  <script src="vendor/leaflet-1.9.4/leaflet.js"
+          integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
+          crossorigin="anonymous"></script>
 
   <!-- App scripts (order matters: helpers first, app last) -->
   <script src="js/config.js"></script>
