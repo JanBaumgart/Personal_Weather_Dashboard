@@ -151,13 +151,7 @@
   }
 
   // ---------- Cloud layer ----------
-  function initCloudLayer() {
-    var btn = document.getElementById('map-cloud-btn');
-    if (!btn || !mapInstance) return;
-
-    var key = window.WD_CONFIG && window.WD_CONFIG.owmApiKey;
-    if (!key) { btn.hidden = true; return; }
-
+  function _setupCloudLayer(btn, key) {
     _cloudBtnRef = btn;
 
     var opacities = [1.0, 0.6, 0];
@@ -180,6 +174,22 @@
       _overlayOpacity.cloud = opacities[state];
       _syncLayerBtn(btn, state, labels);
     });
+  }
+
+  function initCloudLayer() {
+    var btn = document.getElementById('map-cloud-btn');
+    if (!btn || !mapInstance) return;
+
+    var localKey = window.WD_CONFIG && window.WD_CONFIG.owmApiKey;
+    if (localKey) { _setupCloudLayer(btn, localKey); return; }
+
+    fetch('/api/owm-key')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.key) _setupCloudLayer(btn, data.key);
+        else btn.hidden = true;
+      })
+      .catch(function () { btn.hidden = true; });
   }
 
   // ---------- Radar layer ----------
