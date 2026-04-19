@@ -7,27 +7,39 @@
 (function () {
   'use strict';
 
-  const TZ     = 'Europe/Berlin';
+  let _tz      = 'Europe/Berlin';
   const LOCALE = 'de-DE';
 
   // ---------- Formatters ----------
-  const hourFmt = new Intl.DateTimeFormat(LOCALE, {
-    hour: '2-digit', minute: '2-digit', timeZone: TZ, hour12: false
-  });
-  const weekdayFmt = new Intl.DateTimeFormat(LOCALE, {
-    weekday: 'short', timeZone: TZ
-  });
-  const dateShortFmt = new Intl.DateTimeFormat(LOCALE, {
-    day: '2-digit', month: '2-digit', timeZone: TZ
-  });
-  const dateLongFmt = new Intl.DateTimeFormat(LOCALE, {
-    weekday: 'long', day: '2-digit', month: 'long', timeZone: TZ
-  });
-  const updatedFmt = new Intl.DateTimeFormat(LOCALE, {
-    hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: TZ, hour12: false
-  });
-  // Produces YYYY-MM-DD in Berlin local time — used for date comparisons.
-  const berlinDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: TZ });
+  // These are rebuilt by setTimezone() whenever the active location changes.
+  let hourFmt, weekdayFmt, dateShortFmt, dateLongFmt, updatedFmt, localDateFmt;
+
+  function _buildFormatters() {
+    hourFmt = new Intl.DateTimeFormat(LOCALE, {
+      hour: '2-digit', minute: '2-digit', timeZone: _tz, hour12: false
+    });
+    weekdayFmt = new Intl.DateTimeFormat(LOCALE, {
+      weekday: 'short', timeZone: _tz
+    });
+    dateShortFmt = new Intl.DateTimeFormat(LOCALE, {
+      day: '2-digit', month: '2-digit', timeZone: _tz
+    });
+    dateLongFmt = new Intl.DateTimeFormat(LOCALE, {
+      weekday: 'long', day: '2-digit', month: 'long', timeZone: _tz
+    });
+    updatedFmt = new Intl.DateTimeFormat(LOCALE, {
+      hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: _tz, hour12: false
+    });
+    // Produces YYYY-MM-DD in local time — used for "is today" date comparisons.
+    localDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: _tz });
+  }
+
+  _buildFormatters();
+
+  function setTimezone(tz) {
+    _tz = String(tz || 'Europe/Berlin').slice(0, 50);
+    _buildFormatters();
+  }
 
   // ---------- Utils ----------
   function round(n) {
@@ -43,13 +55,87 @@
   function removeSkeleton(el) {
     el.classList.remove('skeleton-text', 'skeleton-box');
   }
-  function todayBerlin() {
-    return berlinDateFmt.format(new Date());
+  function todayLocal() {
+    return localDateFmt.format(new Date());
   }
 
   // Holds the most recent full data object so the delegated click handler
   // on the daily grid always uses fresh API data without rebuilding listeners.
   let _lastData = null;
+
+  // Currently active hourly timestamp (ms) for radar frame scrubbing; null = live.
+  let _activeHourTs = null;
+
+  // ---------- Rain timing helper ----------
+  const PRECIP_THRESHOLD = 40; // % probability minimum
+  function isPrecipCode(code) {
+    return (code >= 51 && code <= 67) ||
+           (code >= 71 && code <= 86) ||
+           code >= 95;
+  }
+  function precipType(code) {
+    if (code >= 95) return 'storm';
+    if ((code >= 71 && code <= 77) || code === 85 || code === 86) return 'snow';
+    return 'rain';
+  }
+
+  /**
+   * Scans hourly data within the next 12 h and returns timing info.
+   * Returns null if no precipitation is expected.
+   * Returns { isNow: bool, endsInMs: number|null, startsInMs: number, type: string }
+   */
+  function findPrecipTiming(hourly, currentCode, currentPrecipMm) {
+    if (!hourly || !hourly.length) return null;
+    const now        = Date.now();
+    const windowEnd  = now + 12 * 3_600_000;
+
+    // Only look at entries within the next 12 h (plus the current bucket which may be <= now)
+    const relevant = hourly.filter(function (h) {
+      return h.time.getTime() >= now - 3_600_000 && h.time.getTime() < windowEnd;
+    });
+    if (!relevant.length) return null;
+
+    // Is it currently precipitating?
+    // currentPrecipMm is the measured mm in the last hour — if 0 the forecast code is stale.
+    const measuredRaining = typeof currentPrecipMm === 'number' ? currentPrecipMm >= 0.1 : true;
+    const currentlyPrecip = isPrecipCode(currentCode) && measuredRaining;
+
+    if (currentlyPrecip) {
+      // Find how long it keeps going (first future bucket that drops below threshold)
+      const type = precipType(currentCode);
+      let endBucket = null;
+      for (const h of relevant) {
+        const prob    = typeof h.precipitationProbability === 'number' ? h.precipitationProbability : 0;
+        const hasCode = isPrecipCode(h.weatherCode);
+        if (!hasCode && prob < PRECIP_THRESHOLD) { endBucket = h; break; }
+      }
+      const endsInMs = endBucket ? endBucket.time.getTime() - now : null;
+      return { isNow: true, endsInMs: endsInMs, startsInMs: 0, type: type };
+    }
+
+    // Not currently raining — find when it starts.
+    // When probability data is available, use it as the primary gate (prob >= threshold).
+    // Only fall back to WMO code if probability is missing from the response.
+    for (const h of relevant) {
+      if (h.time.getTime() < now) continue; // skip current (already checked above)
+      const probAvailable = typeof h.precipitationProbability === 'number';
+      const prob          = probAvailable ? h.precipitationProbability : 0;
+      const hasCode       = isPrecipCode(h.weatherCode);
+      const passes        = probAvailable ? prob >= PRECIP_THRESHOLD : hasCode;
+      if (passes) {
+        const type = hasCode ? precipType(h.weatherCode) : 'rain';
+        return { isNow: false, endsInMs: null, startsInMs: h.time.getTime() - now, type: type };
+      }
+    }
+    return null;
+  }
+
+  function formatDuration(ms) {
+    const mins  = Math.round(ms / 60_000);
+    const hours = Math.round(ms / 3_600_000);
+    if (mins < 60) return mins + ' Min.';
+    return hours + ' Std.';
+  }
 
   // ---------- Hero ----------
   function renderHero(data) {
@@ -104,6 +190,32 @@
       alertEl.className = 'weather-alert ' + type;
       alertEl.textContent = icon + ' ' + text;
       alertEl.hidden = false;
+    }
+
+    // Rain timing chip
+    const timingEl = document.getElementById('rain-timing');
+    if (timingEl) {
+      const timing = findPrecipTiming(data.hourly, c.weatherCode, c.precipitation);
+      if (!timing) {
+        timingEl.hidden = true;
+      } else {
+        const typeIcons = { rain: '🌧️', snow: '❄️', storm: '⛈️' };
+        const icon = typeIcons[timing.type] || '🌧️';
+        let text;
+        if (timing.isNow) {
+          if (timing.endsInMs !== null && timing.endsInMs > 0) {
+            text = icon + ' noch ~' + formatDuration(timing.endsInMs);
+          } else {
+            timingEl.hidden = true;
+            return;
+          }
+        } else {
+          text = '🕐 in ~' + formatDuration(timing.startsInMs);
+        }
+        timingEl.className = 'weather-alert rain-timing ' + timing.type;
+        timingEl.textContent = text;
+        timingEl.hidden = false;
+      }
     }
   }
 
@@ -185,6 +297,8 @@
         item.querySelector('.hourly-temp').textContent   = round(h.temperature) + '\u00B0';
         const p = h.precipitationProbability;
         item.querySelector('.hourly-precip').textContent = '💧 ' + (typeof p === 'number' ? p : 0) + '%';
+        item.dataset.hourTs = String(h.time.getTime());
+        item.classList.toggle('radar-active', h.time.getTime() === _activeHourTs);
       });
       return;
     }
@@ -192,9 +306,11 @@
     // First render or count changed: full build via DocumentFragment.
     const frag = document.createDocumentFragment();
     slice.forEach(function (h, idx) {
+      const isActive = h.time.getTime() === _activeHourTs;
       const item = document.createElement('div');
-      item.className = 'hourly-item' + (idx === 0 ? ' now' : '');
+      item.className = 'hourly-item' + (idx === 0 ? ' now' : '') + (isActive ? ' radar-active' : '');
       item.setAttribute('role', 'listitem');
+      item.dataset.hourTs = String(h.time.getTime());
 
       const timeLabel = document.createElement('span');
       timeLabel.className   = 'hourly-time';
@@ -238,7 +354,7 @@
     }
 
     initDailyClickHandler();
-    const todayStr = todayBerlin();
+    const todayStr = todayLocal();
 
     // In-place update on refresh — only if items are already fully rendered (not skeletons).
     const existing = Array.from(grid.querySelectorAll('.daily-item'));
@@ -246,7 +362,7 @@
     if (isRendered && existing.length === data.daily.length) {
       data.daily.forEach(function (d, idx) {
         const item      = existing[idx];
-        const dateStr   = berlinDateFmt.format(d.date);
+        const dateStr   = localDateFmt.format(d.date);
         const dayLabel  = dateStr === todayStr ? 'Heute' : (idx === 1 ? 'Morgen' : weekdayFmt.format(d.date));
         item.querySelector('.daily-day').textContent   = dayLabel;
         item.querySelector('.daily-date').textContent  = dateShortFmt.format(d.date);
@@ -264,8 +380,8 @@
         const selIdx = parseInt(selected.dataset.dayIndex, 10);
         if (!isNaN(selIdx)) {
           const d        = data.daily[selIdx];
-          const todStr   = todayBerlin();
-          const dStr     = berlinDateFmt.format(d.date);
+          const todStr   = todayLocal();
+          const dStr     = localDateFmt.format(d.date);
           const lbl      = dStr === todStr ? 'Heute' : (selIdx === 1 ? 'Morgen' : weekdayFmt.format(d.date));
           renderDayDetail(d, data.hourly.slice(selIdx * 24, (selIdx + 1) * 24), lbl);
         }
@@ -280,7 +396,7 @@
       item.className = 'daily-item';
       item.dataset.dayIndex = String(idx);
 
-      const dateStr  = berlinDateFmt.format(d.date);
+      const dateStr  = localDateFmt.format(d.date);
       const dayLabel = dateStr === todayStr ? 'Heute' : (idx === 1 ? 'Morgen' : weekdayFmt.format(d.date));
 
       const day = document.createElement('span');
@@ -458,8 +574,8 @@
       } else {
         item.classList.add('selected');
         const d          = _lastData.daily[idx];
-        const todayStr   = todayBerlin();
-        const dateStr    = berlinDateFmt.format(d.date);
+        const todayStr   = todayLocal();
+        const dateStr    = localDateFmt.format(d.date);
         const dayLabel   = dateStr === todayStr ? 'Heute' : (idx === 1 ? 'Morgen' : weekdayFmt.format(d.date));
         const hourlySlice = _lastData.hourly.slice(idx * 24, (idx + 1) * 24);
         renderDayDetail(d, hourlySlice, dayLabel);
@@ -494,10 +610,7 @@
     var now = new Date();
     var startIdx = 0;
     for (var i = 0; i < data.hourly.length; i++) {
-      if (data.hourly[i].time.getTime() >= now.getTime() - 30 * 60 * 1000) {
-        startIdx = i;
-        break;
-      }
+      if (data.hourly[i].time.getTime() >= now.getTime() - 30 * 60 * 1000) { startIdx = i; break; }
     }
     return data.hourly.slice(startIdx, Math.min(startIdx + 24, data.hourly.length));
   }
@@ -507,10 +620,7 @@
     if (!container) return;
 
     var slice = getHourlySlice(data);
-    if (slice.length < 2) {
-      clearChildren(container);
-      return;
-    }
+    if (slice.length < 2) { clearChildren(container); return; }
 
     var NS = 'http://www.w3.org/2000/svg';
     var W = 760, H = 200;
@@ -527,23 +637,20 @@
     var tMax    = tRawMax + tPad;
     var tRange  = tMax - tMin || 1;
 
+    var barAreaY = H - padB + 20; // y-position of time labels at the bottom
+
     function xOf(i) { return padL + (i / (n - 1)) * plotW; }
     function yOf(t) { return padT + (1 - (t - tMin) / tRange) * plotH; }
 
     var pts = slice.map(function (h, i) { return { x: xOf(i), y: yOf(h.temperature) }; });
 
-    // Catmull-Rom → cubic Bézier for smooth curve
     function buildPath(points) {
       var d = 'M ' + points[0].x.toFixed(1) + ',' + points[0].y.toFixed(1);
       for (var i = 1; i < points.length; i++) {
-        var p0  = points[Math.max(0, i - 2)];
-        var p1  = points[i - 1];
-        var p2  = points[i];
-        var p3  = points[Math.min(points.length - 1, i + 1)];
-        var cp1x = p1.x + (p2.x - p0.x) / 6;
-        var cp1y = p1.y + (p2.y - p0.y) / 6;
-        var cp2x = p2.x - (p3.x - p1.x) / 6;
-        var cp2y = p2.y - (p3.y - p1.y) / 6;
+        var p0 = points[Math.max(0, i-2)], p1 = points[i-1];
+        var p2 = points[i], p3 = points[Math.min(points.length-1, i+1)];
+        var cp1x = p1.x + (p2.x - p0.x) / 6, cp1y = p1.y + (p2.y - p0.y) / 6;
+        var cp2x = p2.x - (p3.x - p1.x) / 6, cp2y = p2.y - (p3.y - p1.y) / 6;
         d += ' C ' + cp1x.toFixed(1) + ',' + cp1y.toFixed(1)
            + ' '   + cp2x.toFixed(1) + ',' + cp2y.toFixed(1)
            + ' '   + p2.x.toFixed(1) + ',' + p2.y.toFixed(1);
@@ -554,9 +661,8 @@
     var linePath = buildPath(pts);
     var lastPt   = pts[pts.length - 1];
     var bottomY  = padT + plotH;
-    var areaPath = linePath
-      + ' L ' + lastPt.x.toFixed(1) + ',' + bottomY
-      + ' L ' + pts[0].x.toFixed(1) + ',' + bottomY + ' Z';
+    var areaPath = linePath + ' L ' + lastPt.x.toFixed(1) + ',' + bottomY
+                            + ' L ' + pts[0].x.toFixed(1) + ',' + bottomY + ' Z';
 
     function svgEl(tag) { return document.createElementNS(NS, tag); }
     function setAttrs(elem, attrs) {
@@ -567,7 +673,8 @@
     var svg = setAttrs(svgEl('svg'), {
       viewBox: '0 0 ' + W + ' ' + H,
       'class': 'temp-chart-svg',
-      'aria-hidden': 'true'
+      'aria-hidden': 'true',
+      style: 'cursor:pointer'
     });
 
     // Gradient defs
@@ -588,38 +695,41 @@
     for (var gt = gridStart; gt <= tMax + 0.5; gt += gridStep) {
       if (gt < tMin - 0.5 || gt > tMax + 0.5) continue;
       var gy = yOf(gt);
-      svg.appendChild(setAttrs(svgEl('line'), {
-        x1: padL, x2: W - padR, y1: gy, y2: gy,
-        stroke: '#252a40', 'stroke-width': '1'
-      }));
-      var yLbl = setAttrs(svgEl('text'), {
-        x: padL - 20, y: gy + 4,
-        'text-anchor': 'end', fill: '#5b6178', 'font-size': '11'
-      });
+      svg.appendChild(setAttrs(svgEl('line'), { x1: padL, x2: W - padR, y1: gy, y2: gy, stroke: '#252a40', 'stroke-width': '1' }));
+      var yLbl = setAttrs(svgEl('text'), { x: padL - 20, y: gy + 4, 'text-anchor': 'end', fill: '#5b6178', 'font-size': '11' });
       yLbl.textContent = Math.round(gt) + '\u00B0';
       svg.appendChild(yLbl);
     }
 
-    // Area fill
-    svg.appendChild(setAttrs(svgEl('path'), { d: areaPath, fill: 'url(#tcArea)' }));
+    // Active column highlight (drawn under everything)
+    var colW = plotW / n;
+    if (_activeHourTs !== null) {
+      slice.forEach(function (h, i) {
+        if (h.time.getTime() !== _activeHourTs) return;
+        svg.appendChild(setAttrs(svgEl('rect'), {
+          x: (padL + i * colW).toFixed(1), y: padT,
+          width: colW.toFixed(1), height: plotH,
+          fill: 'rgba(45,212,191,0.15)', rx: '3'
+        }));
+      });
+    }
 
-    // Precipitation bars
-    var barAreaH = 14;
-    var barAreaY = H - padB + 20;
-    var barW     = Math.max(2, (plotW / n) - 2);
+    // Precipitation bars — inside the plot area, behind the temperature curve
     slice.forEach(function (h, i) {
       var p = h.precipitationProbability || 0;
       if (p < 5) return;
-      var bh = (p / 100) * barAreaH;
-      var bx = padL + (i / n) * plotW;
+      var bh = (p / 100) * plotH;
+      var bw = Math.max(4, colW * 0.55);
+      var bx = padL + i * colW + (colW - bw) / 2;
       svg.appendChild(setAttrs(svgEl('rect'), {
-        x: bx.toFixed(1), y: (barAreaY + barAreaH - bh).toFixed(1),
-        width: barW.toFixed(1), height: bh.toFixed(1),
-        fill: 'rgba(56,189,248,0.28)', rx: '2'
+        x: bx.toFixed(1), y: (padT + plotH - bh).toFixed(1),
+        width: bw.toFixed(1), height: bh.toFixed(1),
+        fill: 'rgba(56,189,248,0.13)', rx: '2'
       }));
     });
 
-    // Smooth line
+    // Area fill + smooth line
+    svg.appendChild(setAttrs(svgEl('path'), { d: areaPath, fill: 'url(#tcArea)' }));
     svg.appendChild(setAttrs(svgEl('path'), {
       d: linePath, fill: 'none',
       stroke: 'url(#tcLine)', 'stroke-width': '2.5',
@@ -629,20 +739,20 @@
     // Dots + labels every 3 h
     slice.forEach(function (h, i) {
       var px = pts[i].x, py = pts[i].y;
-      var isNow     = i === 0;
-      var showLabel = isNow || i % 3 === 0;
+      var isNow      = i === 0;
+      var isActive   = h.time.getTime() === _activeHourTs;
+      var showLabel  = isNow || i % 3 === 0;
 
       svg.appendChild(setAttrs(svgEl('circle'), {
         cx: px.toFixed(1), cy: py.toFixed(1), r: showLabel ? '4' : '2.5',
-        fill: isNow ? '#38bdf8' : '#2dd4bf',
-        stroke: '#1a1d2e', 'stroke-width': '2'
+        fill: isActive ? '#2dd4bf' : (isNow ? '#38bdf8' : '#2dd4bf'),
+        stroke: isActive ? '#fff' : '#1a1d2e', 'stroke-width': isActive ? '2.5' : '2'
       }));
 
       if (showLabel) {
         var tLbl = setAttrs(svgEl('text'), {
           x: px.toFixed(1), y: (py - 12).toFixed(1),
-          'text-anchor': 'middle', fill: '#e6e9f2',
-          'font-size': '10', 'font-weight': '600'
+          'text-anchor': 'middle', fill: '#e6e9f2', 'font-size': '10', 'font-weight': '600'
         });
         tLbl.textContent = Math.round(h.temperature) + '\u00B0';
         svg.appendChild(tLbl);
@@ -650,13 +760,23 @@
         var timeLbl = setAttrs(svgEl('text'), {
           x: px.toFixed(1), y: (barAreaY - 4).toFixed(1),
           'text-anchor': 'middle',
-          fill: isNow ? '#38bdf8' : '#8892b0',
-          'font-size': '11',
-          'font-weight': isNow ? '600' : '400'
+          fill: isActive ? '#2dd4bf' : (isNow ? '#38bdf8' : '#8892b0'),
+          'font-size': '11', 'font-weight': (isNow || isActive) ? '600' : '400'
         });
         timeLbl.textContent = isNow ? 'Jetzt' : hourFmt.format(h.time);
         svg.appendChild(timeLbl);
       }
+    });
+
+    // Invisible hit columns — on top, cover full height including time label row
+    slice.forEach(function (h, i) {
+      var hitRect = setAttrs(svgEl('rect'), {
+        x: (padL + i * colW).toFixed(1), y: '0',
+        width: colW.toFixed(1), height: H,
+        fill: 'transparent',
+        'data-hour-ts': String(h.time.getTime())
+      });
+      svg.appendChild(hitRect);
     });
 
     clearChildren(container);
@@ -742,8 +862,8 @@
       var timeEl = document.createElement('div');
       timeEl.className = 'alert-time';
       if (a.onset && a.expires) {
-        var onsetDate   = berlinDateFmt.format(a.onset);
-        var expiresDate = berlinDateFmt.format(a.expires);
+        var onsetDate   = localDateFmt.format(a.onset);
+        var expiresDate = localDateFmt.format(a.expires);
         if (onsetDate === expiresDate) {
           timeEl.textContent = 'Gültig ' + hourFmt.format(a.onset)
             + ' – ' + hourFmt.format(a.expires) + ' Uhr';
@@ -789,6 +909,140 @@
     listEl.appendChild(frag);
   }
 
+  // ---------- Hourly time-peek: hero update ----------
+  function renderHeroForHour(h, data) {
+    var heroIcon     = document.getElementById('hero-icon');
+    var heroTemp     = document.getElementById('hero-temp');
+    var heroDesc     = document.getElementById('hero-desc');
+    var statFeels    = document.getElementById('stat-feels');
+    var statHighLow  = document.getElementById('stat-highlow');
+    var statWind     = document.getElementById('stat-wind');
+    var statHumidity = document.getElementById('stat-humidity');
+    var statUv       = document.getElementById('stat-uv');
+    var statPrecip   = document.getElementById('stat-precip');
+
+    if (heroIcon)     heroIcon.textContent     = h.description.icon;
+    if (heroTemp)     heroTemp.textContent     = round(h.temperature) + '\u00B0';
+    if (heroDesc)     heroDesc.textContent     = h.description.label;
+    if (statFeels)    statFeels.textContent    = h.apparent    !== null ? round(h.apparent)  + '\u00B0'  : '--';
+    if (statWind)     statWind.textContent     = h.windSpeed   !== null ? round(h.windSpeed) + ' km/h'   : '--';
+    if (statHumidity) statHumidity.textContent = h.humidity    !== null ? round(h.humidity)  + ' %'      : '--';
+    if (statUv)       statUv.textContent       = h.uvIndex     !== null ? fmtNum(h.uvIndex, 1)           : '--';
+    if (statPrecip)   statPrecip.textContent   = h.precipitation !== null ? fmtNum(h.precipitation, 1) + ' mm' : '--';
+
+    // High/Low from the daily entry that covers this hour's calendar day
+    var hDateStr = localDateFmt.format(h.time);
+    var dayEntry = null;
+    if (data.daily) {
+      for (var i = 0; i < data.daily.length; i++) {
+        if (localDateFmt.format(data.daily[i].date) === hDateStr) { dayEntry = data.daily[i]; break; }
+      }
+    }
+    if (!dayEntry && data.daily && data.daily.length) dayEntry = data.daily[0];
+    if (statHighLow) statHighLow.textContent = dayEntry
+      ? round(dayEntry.tempMax) + '\u00B0 / ' + round(dayEntry.tempMin) + '\u00B0' : '--';
+
+    // Weather-alert chip — reflects hour's weather code
+    var alertEl = document.getElementById('weather-alert');
+    if (alertEl) {
+      var code = h.weatherCode;
+      var type, aIcon, text;
+      if (code >= 95)                                         { type = 'storm'; aIcon = '⛈️'; text = 'Gewitter'; }
+      else if ((code >= 71 && code <= 77) || code === 85 || code === 86) { type = 'snow'; aIcon = '❄️'; text = 'Schnee'; }
+      else if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) { type = 'rain'; aIcon = '🌧️'; text = 'Regen'; }
+      else                                                    { type = 'clear'; aIcon = '✅'; text = 'Kein Niederschlag'; }
+      alertEl.className   = 'weather-alert ' + type;
+      alertEl.textContent = aIcon + ' ' + text;
+      alertEl.hidden = false;
+    }
+
+    // Hide rain-timing pill (relative to "now", not meaningful for a pinned time)
+    var timingEl = document.getElementById('rain-timing');
+    if (timingEl) timingEl.hidden = true;
+
+    // Subtitle → "15:00 Uhr · Stadtname"
+    var subtitle = document.getElementById('subtitle');
+    if (subtitle && data.location) {
+      subtitle.textContent = hourFmt.format(h.time) + ' Uhr \u00B7 ' + data.location.name + ', ' + data.location.country;
+    }
+  }
+
+  function _showHourHero(ts) {
+    if (!_lastData) return;
+    for (var i = 0; i < _lastData.hourly.length; i++) {
+      if (_lastData.hourly[i].time.getTime() === ts) {
+        renderHeroForHour(_lastData.hourly[i], _lastData);
+        return;
+      }
+    }
+  }
+
+  function _restoreLiveHero() {
+    if (!_lastData) return;
+    renderHero(_lastData);
+    var subtitle = document.getElementById('subtitle');
+    var loc = _lastData.location;
+    if (subtitle && loc) subtitle.textContent = 'Live-Wetter für ' + loc.name + ', ' + loc.country;
+  }
+
+  // ---------- Hourly radar-frame interaction ----------
+  function _handleHourActivation(ts) {
+    if (_activeHourTs === ts) {
+      _activeHourTs = null;
+      if (window.WeatherMap && window.WeatherMap.resetRadarFrame) window.WeatherMap.resetRadarFrame();
+      _restoreLiveHero();
+      _updateActiveHourUI(null);
+    } else {
+      _activeHourTs = ts;
+      // Map: try to show radar frame — shows toast if outside available range, that's fine
+      if (window.WeatherMap && window.WeatherMap.setRadarFrame) window.WeatherMap.setRadarFrame(ts);
+      // Hero: always update to that hour's data
+      _showHourHero(ts);
+      _updateActiveHourUI(ts);
+    }
+  }
+
+  function _updateActiveHourUI(ts) {
+    var strip = document.getElementById('hourly-strip');
+    if (strip) {
+      strip.querySelectorAll('.hourly-item').forEach(function (item) {
+        var itemTs = parseInt(item.dataset.hourTs || '0', 10);
+        item.classList.toggle('radar-active', ts !== null && itemTs === ts);
+      });
+    }
+    if (_lastData) renderTempChart(_lastData);
+  }
+
+  function initHourlyMapClick() {
+    var strip = document.getElementById('hourly-strip');
+    if (strip && !strip._mapClickAttached) {
+      strip._mapClickAttached = true;
+      strip.addEventListener('click', function (e) {
+        var item = e.target.closest('[data-hour-ts]');
+        if (!item) return;
+        var ts = parseInt(item.dataset.hourTs, 10);
+        if (!isNaN(ts)) _handleHourActivation(ts);
+      });
+    }
+
+    var chart = document.getElementById('hourly-chart');
+    if (chart && !chart._mapClickAttached) {
+      chart._mapClickAttached = true;
+      chart.addEventListener('click', function (e) {
+        var hit = e.target.closest('[data-hour-ts]');
+        if (!hit) return;
+        var ts = parseInt(hit.getAttribute('data-hour-ts'), 10);
+        if (!isNaN(ts)) _handleHourActivation(ts);
+      });
+    }
+  }
+
+  function clearActiveHour() {
+    _activeHourTs = null;
+    var strip = document.getElementById('hourly-strip');
+    if (strip) strip.querySelectorAll('.radar-active').forEach(function (el) { el.classList.remove('radar-active'); });
+  }
+
   // ---------- Header / status ----------
   function renderUpdatedAt(date) {
     const el = document.getElementById('last-updated');
@@ -818,18 +1072,21 @@
   }
 
   window.WeatherUI = {
-    renderHero:        renderHero,
-    renderSun:         renderSun,
-    renderHourly:      renderHourly,
-    renderTempChart:   renderTempChart,
-    initHourlyToggle:  initHourlyToggle,
-    renderDaily:       renderDaily,
-    renderDayDetail:   renderDayDetail,
-    hideDayDetail:     hideDayDetail,
-    renderAlerts:      renderAlerts,
-    renderUpdatedAt:   renderUpdatedAt,
-    showError:         showError,
-    hideError:         hideError,
-    setRefreshing:     setRefreshing
+    setTimezone:        setTimezone,
+    renderHero:         renderHero,
+    renderSun:          renderSun,
+    renderHourly:       renderHourly,
+    renderTempChart:    renderTempChart,
+    initHourlyToggle:   initHourlyToggle,
+    initHourlyMapClick: initHourlyMapClick,
+    clearActiveHour:    clearActiveHour,
+    renderDaily:        renderDaily,
+    renderDayDetail:    renderDayDetail,
+    hideDayDetail:      hideDayDetail,
+    renderAlerts:       renderAlerts,
+    renderUpdatedAt:    renderUpdatedAt,
+    showError:          showError,
+    hideError:          hideError,
+    setRefreshing:      setRefreshing
   };
 })();

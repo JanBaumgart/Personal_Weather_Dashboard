@@ -10,11 +10,22 @@
   let mapInstance    = null;
   let markerInstance = null;
 
-  // Tracks opacity of each overlay so the zoom-toast only appears when
-  // at least one layer is actually visible.
   var _overlayOpacity = { cloud: 0, radar: 0 };
   var _overlayLayers  = { cloud: null, radar: null };
 
+  // Frame scrubbing / animation state
+  var _allFrames           = [];   // [{time (unix s), path}, ...] past + nowcast combined
+  var _pastFrameCount      = 0;
+  var _liveFramePath       = null;
+  var _currentHost         = null;
+  var _framePinned         = false;
+  var _cloudHiddenForFrame = false;
+  var _cloudBtnRef         = null;
+  var _animBtn             = null;
+  var _animTimerId         = null;
+  var _animIdx             = 0;
+
+  // ---------- Map init ----------
   function initMap(opts) {
     if (mapInstance) return mapInstance;
 
@@ -38,6 +49,7 @@
 
     const weatherIcon = L.divIcon({
       html:        '<div class="weather-marker">⛅</div>',
+      className:   '',
       iconSize:    [40, 40],
       iconAnchor:  [20, 20],
       popupAnchor: [0, -20]
@@ -49,41 +61,29 @@
 
     L.control.scale({ position: 'bottomright', imperial: false }).addTo(mapInstance);
 
-    // Scroll-zoom: enable on container mouseenter, disable on mouseleave.
     const container = mapInstance.getContainer();
-    container.addEventListener('mouseenter', function () {
-      mapInstance.scrollWheelZoom.enable();
-    });
-    container.addEventListener('mouseleave', function () {
-      mapInstance.scrollWheelZoom.disable();
-    });
+    container.addEventListener('mouseenter', function () { mapInstance.scrollWheelZoom.enable(); });
+    container.addEventListener('mouseleave', function () { mapInstance.scrollWheelZoom.disable(); });
 
-    // At very high zoom levels, overlay data is too low-resolution to be useful.
-    // Hide and show a hint; restore when zooming back out.
     mapInstance.on('zoomend', function () {
-      var z         = mapInstance.getZoom();
-      var overZoom  = z > 12;
+      var z        = mapInstance.getZoom();
+      var overZoom = z > 12;
       var hasActive = _overlayOpacity.cloud > 0 || _overlayOpacity.radar > 0;
-
       if (overZoom) {
         if (_overlayLayers.cloud) _overlayLayers.cloud.setOpacity(0);
         if (_overlayLayers.radar) _overlayLayers.radar.setOpacity(0);
-        if (hasActive) _showZoomToast(container.parentElement);
+        if (hasActive) _showMapToast(container.parentElement, 'Wetter-Overlays bei dieser Zoomstufe ausgeblendet');
       } else {
         if (_overlayLayers.cloud) _overlayLayers.cloud.setOpacity(_overlayOpacity.cloud);
         if (_overlayLayers.radar) _overlayLayers.radar.setOpacity(_overlayOpacity.radar);
       }
     });
 
-    // ResizeObserver fires once the container has a real size.
     if (typeof ResizeObserver !== 'undefined') {
-      var resizeObserver = new ResizeObserver(function (entries) {
-        if (entries[0].contentRect.width > 0) {
-          mapInstance.invalidateSize();
-          resizeObserver.disconnect();
-        }
+      var ro = new ResizeObserver(function (entries) {
+        if (entries[0].contentRect.width > 0) { mapInstance.invalidateSize(); ro.disconnect(); }
       });
-      resizeObserver.observe(container);
+      ro.observe(container);
     } else {
       setTimeout(function () { if (mapInstance) mapInstance.invalidateSize(); }, 300);
     }
@@ -91,23 +91,23 @@
     return mapInstance;
   }
 
-  function _showZoomToast(mapWrap) {
+  // ---------- Toast ----------
+  function _showMapToast(mapWrap, msg) {
     var toast = mapWrap.querySelector('.map-zoom-toast');
     if (!toast) {
       toast = document.createElement('div');
-      toast.className  = 'map-zoom-toast';
-      toast.textContent = 'Wetter-Overlays bei dieser Zoomstufe ausgeblendet';
+      toast.className = 'map-zoom-toast';
       mapWrap.appendChild(toast);
     }
+    toast.textContent = msg;
     if (toast._hideTimer) clearTimeout(toast._hideTimer);
     toast.classList.remove('map-zoom-toast--visible');
-    void toast.offsetWidth; // force reflow so transition re-triggers
+    void toast.offsetWidth;
     toast.classList.add('map-zoom-toast--visible');
-    toast._hideTimer = setTimeout(function () {
-      toast.classList.remove('map-zoom-toast--visible');
-    }, 3000);
+    toast._hideTimer = setTimeout(function () { toast.classList.remove('map-zoom-toast--visible'); }, 3000);
   }
 
+  // ---------- Popup helpers ----------
   function _buildPopupEl(name, sub, coords) {
     var el   = document.createElement('div');
     var bold = document.createElement('strong');
@@ -133,25 +133,24 @@
 
   function updateMarkerPopup(current, locationName) {
     if (!markerInstance || !current) return;
-    const name = locationName || 'Wetter';
-    const temp = Math.round(current.temperature);
-    const icon = current.description ? current.description.icon  : '';
-    const desc = current.description ? current.description.label : '';
-
-    var el       = document.createElement('div');
-    var bold     = document.createElement('strong');
-    var iconSpan = document.createElement('span');
-    bold.textContent         = name;
-    iconSpan.className       = 'popup-weather-icon';
-    iconSpan.textContent     = icon;
+    const name     = locationName || 'Wetter';
+    const temp     = Math.round(current.temperature);
+    const icon     = current.description ? current.description.icon  : '';
+    const desc     = current.description ? current.description.label : '';
+    var el         = document.createElement('div');
+    var bold       = document.createElement('strong');
+    var iconSpan   = document.createElement('span');
+    bold.textContent     = name;
+    iconSpan.className   = 'popup-weather-icon';
+    iconSpan.textContent = icon;
     el.appendChild(bold);
     el.appendChild(document.createElement('br'));
     el.appendChild(iconSpan);
     el.appendChild(document.createTextNode(' ' + temp + '\u00B0C \u00B7 ' + desc));
-
     markerInstance.setPopupContent(el);
   }
 
+  // ---------- Cloud layer ----------
   function initCloudLayer() {
     var btn = document.getElementById('map-cloud-btn');
     if (!btn || !mapInstance) return;
@@ -159,16 +158,16 @@
     var key = window.WD_CONFIG && window.WD_CONFIG.owmApiKey;
     if (!key) { btn.hidden = true; return; }
 
+    _cloudBtnRef = btn;
+
     var opacities = [1.0, 0.6, 0];
     var labels    = ['Wolken dimmen', 'Wolken ausblenden', 'Wolken einblenden'];
     var state     = 0;
     var tileUrl   = 'https://tile.openweathermap.org/map/clouds_new/{z}/{x}/{y}.png?appid=' + key;
 
     var cloudLayer = L.tileLayer(tileUrl, {
-      opacity:       opacities[state],
-      maxZoom:       18,
-      maxNativeZoom: 14,
-      attribution:   'Wolken: <a href="https://openweathermap.org" target="_blank" rel="noopener noreferrer">OpenWeatherMap</a>'
+      opacity: opacities[state], maxZoom: 18, maxNativeZoom: 14,
+      attribution: 'Wolken: <a href="https://openweathermap.org" target="_blank" rel="noopener noreferrer">OpenWeatherMap</a>'
     });
     cloudLayer.addTo(mapInstance);
     _overlayLayers.cloud  = cloudLayer;
@@ -183,76 +182,47 @@
     });
   }
 
-  // 1×1 transparent GIF used to blank out invalid radar tiles.
-  var TRANSPARENT_PX = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
-
-  // How often to re-fetch weather-maps.json so the frame timestamp stays fresh.
-  // RainViewer publishes new frames every 10 min; an older cached URL will
-  // eventually serve "Zoom Level Not Supported" for every tile.
+  // ---------- Radar layer ----------
+  var TRANSPARENT_PX   = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
   var RADAR_REFRESH_MS = 5 * 60 * 1000;
+  var SAMPLE_TILE_Z = 6, SAMPLE_TILE_X = 33, SAMPLE_TILE_Y = 21;
 
-  // URL of a sample tile used by the pre-flight check. Chosen in the centre of
-  // RainViewer's European coverage (approx. 50°N, 10°E) at zoom 6 — tile
-  // coordinates (33,21) in the standard XYZ scheme. If this tile already comes
-  // back as an error image, the entire frame is stale/broken and the layer is
-  // suppressed rather than shown as an unusable grey blanket.
-  var SAMPLE_TILE_Z = 6;
-  var SAMPLE_TILE_X = 33;
-  var SAMPLE_TILE_Y = 21;
+  function _buildRadarUrl(host, path) {
+    return host + path + '/256/{z}/{x}/{y}/2/1_1.png';
+  }
 
-  // Heuristic used by both the per-tile sweep AND the pre-flight sample check.
-  // RainViewer returns a PNG with "Zoom Level Not Supported" (HTTP 200) for
-  // tiles outside its coverage — not just high-zoom tiles, also geographically
-  // uncovered areas at any zoom. Signature: mostly-opaque grey (R≈G≈B),
-  // zero saturated colour pixels. Real radar tiles are either fully transparent
-  // (no precipitation) or contain saturated blue/green/yellow/red pixels.
   function _isRadarErrorTile(img) {
     try {
       if (!img || !img.complete || !img.naturalWidth) return false;
-      var w = img.naturalWidth  || 256;
-      var h = img.naturalHeight || 256;
+      var w = img.naturalWidth || 256, h = img.naturalHeight || 256;
       var canvas = document.createElement('canvas');
-      canvas.width  = w;
-      canvas.height = h;
+      canvas.width = w; canvas.height = h;
       var ctx = canvas.getContext('2d');
       if (!ctx) return false;
       ctx.drawImage(img, 0, 0);
-      var step = 8;                    // 32×32 = 1024 samples on a 256px tile
-      var data = ctx.getImageData(0, 0, w, h).data;
-      var visibleGrey  = 0;
-      var saturated    = 0;
-      var visibleTotal = 0;
-      var total        = 0;
+      var step = 8, data = ctx.getImageData(0, 0, w, h).data;
+      var visibleGrey = 0, saturated = 0, visibleTotal = 0, total = 0;
       for (var y = 0; y < h; y += step) {
         for (var x = 0; x < w; x += step) {
           var i = (y * w + x) * 4;
-          var r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+          var r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
           total++;
           if (a < 20) continue;
           visibleTotal++;
-          var maxc = Math.max(r, g, b);
-          var minc = Math.min(r, g, b);
-          if (maxc - minc <= 16)      visibleGrey++;
+          var maxc = Math.max(r,g,b), minc = Math.min(r,g,b);
+          if (maxc - minc <= 16) visibleGrey++;
           else if (maxc - minc >= 40) saturated++;
         }
       }
-      if (visibleTotal === 0) return false;   // fully transparent → fine
-      if (saturated > 0)       return false;   // has real precip colour → fine
-      var coverage  = visibleTotal / total;
-      var greyRatio = visibleGrey / visibleTotal;
-      return coverage >= 0.3 && greyRatio >= 0.7;
+      if (visibleTotal === 0) return false;
+      if (saturated > 0) return false;
+      return (visibleTotal / total) >= 0.3 && (visibleGrey / visibleTotal) >= 0.7;
     } catch (e) {
-      // Tainted canvas (CORS race) → we cannot verify; assume bad to blank out.
-      if (window.console) console.warn('[WeatherMap] canvas tainted — possible CORS regression:', e);
+      if (window.console) console.warn('[WeatherMap] canvas tainted:', e);
       return true;
     }
   }
 
-  // Pre-flight: download a known sample tile into an Image(), then run the
-  // error-image heuristic on it. Resolves with `true` if the frame URL is
-  // good, `false` if the sample already is an error image, and rejects on
-  // network/decode failure. Uses a fresh query string so it bypasses any
-  // stale cached entry.
   function _probeRadarTile(tileUrlTemplate) {
     return new Promise(function (resolve, reject) {
       var url = tileUrlTemplate
@@ -263,23 +233,9 @@
       var img = new Image();
       img.crossOrigin = 'anonymous';
       var done = false;
-      var timeout = setTimeout(function () {
-        if (done) return;
-        done = true;
-        reject(new Error('radar probe timeout'));
-      }, 6000);
-      img.onload = function () {
-        if (done) return;
-        done = true;
-        clearTimeout(timeout);
-        resolve(!_isRadarErrorTile(img));
-      };
-      img.onerror = function () {
-        if (done) return;
-        done = true;
-        clearTimeout(timeout);
-        reject(new Error('radar probe load failed'));
-      };
+      var timeout = setTimeout(function () { if (!done) { done = true; reject(new Error('probe timeout')); } }, 6000);
+      img.onload  = function () { if (!done) { done = true; clearTimeout(timeout); resolve(!_isRadarErrorTile(img)); } };
+      img.onerror = function () { if (!done) { done = true; clearTimeout(timeout); reject(new Error('probe load failed')); } };
       img.src = url;
     });
   }
@@ -293,15 +249,9 @@
     var labels         = ['Niederschlag dimmen', 'Niederschlag ausblenden', 'Niederschlag einblenden'];
     var state          = 0;
     var refreshTimerId = null;
-    var currentHost    = null;
 
-    function _disableLayer(reason) {
-      // Called when RainViewer is clearly broken (bad probe, fetch fail).
-      // Hide the button and remove any stale layer so the user doesn't see a
-      // grey blanket of error tiles.
-      if (radarLayer && mapInstance.hasLayer(radarLayer)) {
-        mapInstance.removeLayer(radarLayer);
-      }
+    function _disableLayer() {
+      if (radarLayer && mapInstance.hasLayer(radarLayer)) mapInstance.removeLayer(radarLayer);
       radarLayer = null;
       _overlayLayers.radar  = null;
       _overlayOpacity.radar = 0;
@@ -309,18 +259,10 @@
       if (refreshTimerId) { clearInterval(refreshTimerId); refreshTimerId = null; }
     }
 
-    function _buildTileUrl(host, path) {
-      return host + path + '/256/{z}/{x}/{y}/2/1_1.png';
-    }
-
     function _fetchFrameUrl() {
-      // Fetches weather-maps.json and returns the newest frame's tile URL
-      // template. Kept as its own function so we can reuse it from the
-      // refresh timer.
-      var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      var timer = controller ? setTimeout(function () { controller.abort(); }, 8000) : null;
-      return fetch('https://api.rainviewer.com/public/weather-maps.json',
-                   controller ? { signal: controller.signal } : {})
+      var ctrl  = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 8000) : null;
+      return fetch('https://api.rainviewer.com/public/weather-maps.json', ctrl ? { signal: ctrl.signal } : {})
         .then(function (r) {
           if (timer) clearTimeout(timer);
           if (!r.ok) throw new Error('RainViewer ' + r.status);
@@ -328,41 +270,33 @@
         })
         .then(function (data) {
           var host = data.host;
-          if (typeof host !== 'string' ||
-              !/^https:\/\/tilecache\.rainviewer\.com/.test(host)) {
+          if (typeof host !== 'string' || !/^https:\/\/tilecache\.rainviewer\.com/.test(host))
             throw new Error('unexpected RainViewer host: ' + host);
-          }
-          var frames = data.radar && data.radar.past;
+          var frames  = data.radar && data.radar.past;
+          var nowcast = data.radar && data.radar.nowcast;
           if (!frames || frames.length === 0) throw new Error('no radar data');
-          currentHost = host;
-          var latest = frames[frames.length - 1];
-          return _buildTileUrl(host, latest.path);
+          _currentHost    = host;
+          _pastFrameCount = frames.length;
+          _allFrames      = frames.concat(nowcast || []);
+          var latest      = frames[frames.length - 1];
+          _liveFramePath  = latest.path;
+          return _buildRadarUrl(host, latest.path);
         });
     }
 
     function _startOrRefresh(tileUrl, isInitial) {
       if (!radarLayer) {
-        // First-time setup
         radarLayer = L.tileLayer(tileUrl, {
-          opacity:       opacities[state],
-          maxZoom:       18,
-          maxNativeZoom: 7,             // RainViewer serves errors at zoom 8+; Leaflet
-                                        // scales zoom-7 tiles up instead of requesting them.
-          crossOrigin:   'anonymous',
-          attribution:   'Radar: <a href="https://www.rainviewer.com" target="_blank" rel="noopener noreferrer">RainViewer</a>'
+          opacity: opacities[state], maxZoom: 18, maxNativeZoom: 7, crossOrigin: 'anonymous',
+          attribution: 'Radar: <a href="https://www.rainviewer.com" target="_blank" rel="noopener noreferrer">RainViewer</a>'
         });
-
-        // Real HTTP errors — replace tile with transparent pixel.
-        radarLayer.on('tileerror', function (ev) {
-          if (ev.tile) ev.tile.src = TRANSPARENT_PX;
-        });
-
+        radarLayer.on('tileerror', function (ev) { if (ev.tile) ev.tile.src = TRANSPARENT_PX; });
         radarLayer.addTo(mapInstance);
         _overlayLayers.radar  = radarLayer;
         _overlayOpacity.radar = opacities[state];
         _syncLayerBtn(btn, state, labels);
-      } else if (!isInitial) {
-        // Refresh path — swap the URL so Leaflet requests the fresh frame.
+      } else if (!isInitial && !_framePinned && !_animTimerId) {
+        // Only update live frame if not pinned or animating
         radarLayer.setUrl(tileUrl, false);
       }
     }
@@ -370,42 +304,20 @@
     function _loadFrame(isInitial) {
       return _fetchFrameUrl().then(function (tileUrl) {
         return _probeRadarTile(tileUrl).then(function (ok) {
-          if (!ok) {
-            // Frame is already an error image everywhere — don't show it.
-            if (isInitial) _disableLayer('probe failed');
-            // On refresh, keep the previous (still-working) layer rather than
-            // swapping to a known-bad URL.
-            return;
-          }
+          if (!ok) { if (isInitial) _disableLayer(); return; }
           _startOrRefresh(tileUrl, isInitial);
         });
       });
     }
 
-    _loadFrame(true).catch(function () {
-      if (radarLayer) {
-        // We already had a working layer; keep it. Only disable if nothing
-        // was ever shown.
-        return;
-      }
-      _disableLayer('initial fetch failed');
-    });
+    _loadFrame(true).catch(function () { if (!radarLayer) _disableLayer(); });
 
-    // Periodic refresh keeps the frame timestamp current so tiles don't go
-    // stale after ~10 min of runtime. Guard clears any orphaned timer if
-    // initRadarLayer() is ever called twice. Stops after 5 consecutive
-    // failures to avoid runaway requests against a dead endpoint.
     if (refreshTimerId) { clearInterval(refreshTimerId); refreshTimerId = null; }
-    var _refreshFailCount = 0;
+    var _failCount = 0;
     refreshTimerId = setInterval(function () {
-      _loadFrame(false)
-        .then(function () { _refreshFailCount = 0; })
-        .catch(function () {
-          if (++_refreshFailCount >= 5) {
-            clearInterval(refreshTimerId);
-            refreshTimerId = null;
-          }
-        });
+      _loadFrame(false).then(function () { _failCount = 0; }).catch(function () {
+        if (++_failCount >= 5) { clearInterval(refreshTimerId); refreshTimerId = null; }
+      });
     }, RADAR_REFRESH_MS);
 
     btn.addEventListener('click', function () {
@@ -421,6 +333,161 @@
     btn.setAttribute('aria-label', labels[state]);
   }
 
+  // ---------- Time overlay ----------
+  function _getOrCreateTimeOverlay() {
+    if (!mapInstance) return null;
+    var wrap = mapInstance.getContainer().parentElement;
+    if (!wrap) return null;
+    var el = wrap.querySelector('.map-time-overlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'map-time-overlay';
+      wrap.appendChild(el);
+    }
+    return el;
+  }
+
+  function _showTimeOverlay(tsSeconds, isNowcast) {
+    var el = _getOrCreateTimeOverlay();
+    if (!el) return;
+    var d   = new Date(tsSeconds * 1000);
+    var fmt = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Berlin' });
+    el.textContent = fmt.format(d) + ' Uhr' + (isNowcast ? ' · Prognose' : '');
+    el.classList.toggle('map-time-overlay--nowcast', !!isNowcast);
+    el.classList.add('map-time-overlay--visible');
+  }
+
+  function _hideTimeOverlay() {
+    var el = _getOrCreateTimeOverlay();
+    if (el) el.classList.remove('map-time-overlay--visible');
+  }
+
+  // ---------- Shared reset helper ----------
+  function _doReset() {
+    if (_liveFramePath && _overlayLayers.radar && _currentHost) {
+      _overlayLayers.radar.setUrl(_buildRadarUrl(_currentHost, _liveFramePath), false);
+    }
+    _hideTimeOverlay();
+    if (_cloudHiddenForFrame) {
+      _cloudHiddenForFrame = false;
+      if (_cloudBtnRef) _cloudBtnRef.style.display = '';
+      if (_overlayLayers.cloud) _overlayLayers.cloud.setOpacity(_overlayOpacity.cloud);
+    }
+  }
+
+  // ---------- Frame scrubbing (public) ----------
+  function setRadarFrame(msTimestamp) {
+    var tsSeconds = msTimestamp > 1e10 ? Math.round(msTimestamp / 1000) : msTimestamp;
+    if (!_allFrames.length || !_overlayLayers.radar || !_currentHost) return false;
+
+    var closest = _allFrames.reduce(function (a, b) {
+      return Math.abs(b.time - tsSeconds) < Math.abs(a.time - tsSeconds) ? b : a;
+    });
+
+    if (Math.abs(closest.time - tsSeconds) > 6000) {
+      var wrap = mapInstance && mapInstance.getContainer().parentElement;
+      if (wrap) _showMapToast(wrap, 'Keine Radardaten für diese Zeit verfügbar');
+      return false;
+    }
+
+    // Stop running animation without resetting the frame
+    if (_animTimerId) {
+      clearInterval(_animTimerId);
+      _animTimerId = null;
+      if (_animBtn) {
+        _animBtn.classList.remove('playing');
+        _animBtn.setAttribute('aria-label', 'Radar-Animation abspielen');
+        var lbl = _animBtn.querySelector('.anim-label');
+        if (lbl) lbl.textContent = '▶ Abspielen';
+      }
+    }
+
+    _framePinned = true;
+    _overlayLayers.radar.setUrl(_buildRadarUrl(_currentHost, closest.path), false);
+    _showTimeOverlay(closest.time);
+
+    if (!_cloudHiddenForFrame) {
+      _cloudHiddenForFrame = true;
+      if (_cloudBtnRef) _cloudBtnRef.style.display = 'none';
+      if (_overlayLayers.cloud) _overlayLayers.cloud.setOpacity(0);
+    }
+
+    return true;
+  }
+
+  function resetRadarFrame() {
+    if (_animTimerId) { clearInterval(_animTimerId); _animTimerId = null; }
+    if (_animBtn) {
+      _animBtn.classList.remove('playing');
+      _animBtn.setAttribute('aria-label', 'Radar-Animation abspielen');
+      var lbl = _animBtn.querySelector('.anim-label');
+      if (lbl) lbl.textContent = '▶ Abspielen';
+    }
+    _framePinned = false;
+    _doReset();
+  }
+
+  // ---------- Animation ----------
+  function _startAnimation() {
+    if (!_allFrames.length || !_overlayLayers.radar || !_currentHost) return;
+    _animIdx     = 0;
+    _framePinned = false;
+
+    if (!_cloudHiddenForFrame) {
+      _cloudHiddenForFrame = true;
+      if (_cloudBtnRef) _cloudBtnRef.style.display = 'none';
+      if (_overlayLayers.cloud) _overlayLayers.cloud.setOpacity(0);
+    }
+
+    if (_animBtn) {
+      _animBtn.classList.add('playing');
+      _animBtn.setAttribute('aria-label', 'Animation stoppen');
+      var lbl = _animBtn.querySelector('.anim-label');
+      if (lbl) lbl.textContent = '⏹ Stopp';
+    }
+
+    function playFrame() {
+      if (_animIdx >= _allFrames.length) { _stopAnimation(); return; }
+      var frame = _allFrames[_animIdx++];
+      _overlayLayers.radar.setUrl(_buildRadarUrl(_currentHost, frame.path), false);
+      _showTimeOverlay(frame.time, _animIdx > _pastFrameCount);
+    }
+
+    playFrame();
+    _animTimerId = setInterval(playFrame, 1000);
+  }
+
+  function _stopAnimation() {
+    if (_animTimerId) { clearInterval(_animTimerId); _animTimerId = null; }
+    if (_animBtn) {
+      _animBtn.classList.remove('playing');
+      _animBtn.setAttribute('aria-label', 'Radar-Animation abspielen');
+      var lbl = _animBtn.querySelector('.anim-label');
+      if (lbl) lbl.textContent = '▶ Abspielen';
+    }
+    _doReset();
+  }
+
+  function initAnimation() {
+    if (!mapInstance) return;
+    var wrap = mapInstance.getContainer().parentElement;
+    if (!wrap || wrap.querySelector('.map-anim-btn')) return;
+
+    var btn = document.createElement('button');
+    btn.type      = 'button';
+    btn.className = 'map-anim-btn';
+    btn.setAttribute('aria-label', 'Radar-Animation abspielen');
+    btn.innerHTML = '<span class="anim-label">▶ Abspielen</span>';
+    wrap.appendChild(btn);
+    _animBtn = btn;
+
+    btn.addEventListener('click', function () {
+      if (_animTimerId) _stopAnimation();
+      else              _startAnimation();
+    });
+  }
+
+  // ---------- Map expand ----------
   function initMapExpand() {
     var btn     = document.getElementById('map-expand-btn');
     var mapCard = btn && btn.closest('.map-card');
@@ -432,9 +499,7 @@
       if (rowEl) rowEl.classList.toggle('map-row-expanded', expanded);
       btn.setAttribute('aria-expanded', String(expanded));
       btn.setAttribute('aria-label', expanded ? 'Karte verkleinern' : 'Karte maximieren');
-      setTimeout(function () {
-        if (mapInstance) mapInstance.invalidateSize();
-      }, 320);
+      setTimeout(function () { if (mapInstance) mapInstance.invalidateSize(); }, 320);
     });
   }
 
@@ -443,7 +508,10 @@
     initMapExpand:     initMapExpand,
     initCloudLayer:    initCloudLayer,
     initRadarLayer:    initRadarLayer,
+    initAnimation:     initAnimation,
     moveMarker:        moveMarker,
-    updateMarkerPopup: updateMarkerPopup
+    updateMarkerPopup: updateMarkerPopup,
+    setRadarFrame:     setRadarFrame,
+    resetRadarFrame:   resetRadarFrame
   };
 })();

@@ -20,7 +20,10 @@
         <span class="brand-mark">&#9729;</span>
         <div class="brand-text">
           <h1>Weather Dashboard</h1>
-          <p id="subtitle" class="subtitle">Live-Wetter für Nürnberg, DE</p>
+          <div class="subtitle-row">
+            <p id="subtitle" class="subtitle">Live-Wetter für Nürnberg, DE</p>
+            <button id="subtitle-fav-btn" class="fav-star-btn" type="button" aria-label="Als Favorit speichern" title="Als Favorit speichern">&#9734;</button>
+          </div>
         </div>
       </div>
 
@@ -86,7 +89,10 @@
             <div id="hero-desc" class="hero-desc skeleton-text">Lade&hellip;</div>
           </div>
         </div>
-        <div id="weather-alert" class="weather-alert" hidden></div>
+        <div class="alert-row">
+          <div id="weather-alert" class="weather-alert" hidden></div>
+          <div id="rain-timing" class="weather-alert rain-timing" hidden></div>
+        </div>
       </div>
 
       <div class="hero-right">

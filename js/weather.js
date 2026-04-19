@@ -22,7 +22,7 @@
       '?latitude='  + loc.lat + '&longitude=' + loc.lon +
       '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,apparent_temperature,precipitation,weather_code,uv_index' +
       '&daily=temperature_2m_max,temperature_2m_min,weather_code,sunrise,sunset,uv_index_max,precipitation_sum' +
-      '&hourly=temperature_2m,weather_code,precipitation_probability' +
+      '&hourly=temperature_2m,apparent_temperature,wind_speed_10m,relative_humidity_2m,uv_index,precipitation,weather_code,precipitation_probability' +
       '&timezone=' + encodeURIComponent(loc.timezone || 'Europe/Berlin') +
       '&timeformat=unixtime' +
       '&forecast_days=7' +
@@ -111,7 +111,7 @@
     const q = String(query).trim().slice(0, 100);
     if (!q) return [];
     const url = 'https://geocoding-api.open-meteo.com/v1/search?name=' +
-      encodeURIComponent(q) + '&count=5&language=de&format=json';
+      encodeURIComponent(q) + '&count=10&language=de&format=json';
     const resp = await fetchWithTimeout(url, 10000);
     if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
     const data = await resp.json();
@@ -204,18 +204,28 @@
     });
 
     const {
-      time:                     hourlyTimes  = [],
-      temperature_2m:           hourlyTemp   = [],
-      weather_code:             hourlyWc     = [],
-      precipitation_probability: hourlyPrecip = []
+      time:                     hourlyTimes    = [],
+      temperature_2m:           hourlyTemp     = [],
+      apparent_temperature:     hourlyApparent = [],
+      wind_speed_10m:           hourlyWind     = [],
+      relative_humidity_2m:     hourlyHumidity = [],
+      uv_index:                 hourlyUv       = [],
+      precipitation:            hourlyPrecipMm = [],
+      weather_code:             hourlyWc       = [],
+      precipitation_probability: hourlyPrecip  = []
     } = h;
 
     const hourly = hourlyTimes.map(function (ts, i) {
       return {
         time:                    new Date(ts * 1000),
-        temperature:             hourlyTemp[i]   ?? null,
-        weatherCode:             hourlyWc[i]     ?? null,
-        precipitationProbability: hourlyPrecip[i] ?? null,
+        temperature:             hourlyTemp[i]     ?? null,
+        apparent:                hourlyApparent[i] ?? null,
+        windSpeed:               hourlyWind[i]     ?? null,
+        humidity:                hourlyHumidity[i] ?? null,
+        uvIndex:                 hourlyUv[i]       ?? null,
+        precipitation:           hourlyPrecipMm[i] ?? null,
+        weatherCode:             hourlyWc[i]       ?? null,
+        precipitationProbability: hourlyPrecip[i]  ?? null,
         description:             describeWeather(hourlyWc[i] ?? null)
       };
     });
