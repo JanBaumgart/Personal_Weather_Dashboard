@@ -167,32 +167,32 @@
   }
 
   function _buildSuggestionItem(r, isFav) {
-    var li = document.createElement('li');
+    const li = document.createElement('li');
     li.className = 'search-suggestion-item';
     li.setAttribute('role', 'option');
     li.setAttribute('tabindex', '0');
 
-    var nameSpan = document.createElement('span');
+    const nameSpan = document.createElement('span');
     nameSpan.className = 'suggestion-name';
     nameSpan.textContent = r.displayName || (r.name + ', ' + r.country);
     li.appendChild(nameSpan);
 
-    var starBtn = document.createElement('button');
+    const starBtn = document.createElement('button');
     starBtn.type = 'button';
     starBtn.className = 'suggestion-star' + (isFav ? ' active' : '');
     starBtn.textContent = isFav ? '\u2605' : '\u2606';
     starBtn.setAttribute('aria-label', isFav ? 'Aus Favoriten entfernen' : 'Als Favorit speichern');
     starBtn.addEventListener('click', function (e) {
       e.stopPropagation();
-      var nowFav = toggleFavorite(r);
+      const nowFav = toggleFavorite(r);
       starBtn.textContent = nowFav ? '\u2605' : '\u2606';
       starBtn.classList.toggle('active', nowFav);
       starBtn.setAttribute('aria-label', nowFav ? 'Aus Favoriten entfernen' : 'Als Favorit speichern');
       updateSubtitleStar();
       // If viewing favorites and this one was removed, refresh the dropdown
       if (!nowFav) {
-        var input = document.getElementById('search-input');
-        if (input && !input.value.trim()) showFavoritesDropdown();
+        const inp = document.getElementById('search-input');
+        if (inp && !inp.value.trim()) showFavoritesDropdown();
       }
     });
     li.appendChild(starBtn);
@@ -202,12 +202,12 @@
       pickLocation(r);
     });
     li.addEventListener('keydown', function (e) {
-      var list = document.getElementById('search-suggestions');
-      var items = list ? Array.from(list.querySelectorAll('.search-suggestion-item')) : [];
-      var idx   = items.indexOf(li);
+      const list  = document.getElementById('search-suggestions');
+      const items = list ? Array.from(list.querySelectorAll('.search-suggestion-item')) : [];
+      const idx   = items.indexOf(li);
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickLocation(r); }
-      if (e.key === 'ArrowDown') { e.preventDefault(); var next = items[idx + 1]; if (next) next.focus(); }
-      if (e.key === 'ArrowUp')   { e.preventDefault(); var prev = items[idx - 1]; if (prev) prev.focus(); else document.getElementById('search-input').focus(); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); const next = items[idx + 1]; if (next) next.focus(); }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); const prev = items[idx - 1]; if (prev) prev.focus(); else document.getElementById('search-input').focus(); }
     });
     return li;
   }
@@ -289,8 +289,8 @@
   }
 
   function initSearch() {
-    var form  = document.getElementById('search-form');
-    var input = document.getElementById('search-input');
+    const form  = document.getElementById('search-form');
+    const input = document.getElementById('search-input');
     if (!form || !input) return;
 
     form.addEventListener('submit', function (e) {
@@ -324,7 +324,7 @@
       if (e.key === 'Escape') { if (_debounceTimer) { clearTimeout(_debounceTimer); _debounceTimer = null; } hideSuggestions(); }
       if (e.key === 'ArrowDown' && _suggestionsVisible) {
         e.preventDefault();
-        var first = document.querySelector('#search-suggestions .search-suggestion-item');
+        const first = document.querySelector('#search-suggestions .search-suggestion-item');
         if (first) first.focus();
       }
     });

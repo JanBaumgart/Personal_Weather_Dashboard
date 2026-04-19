@@ -137,6 +137,52 @@
     return hours + ' Std.';
   }
 
+  // ---------- Shared helpers ----------
+  function _renderAlertChip(alertEl, code, suffix) {
+    if (!alertEl) return;
+    var type, icon, text;
+    if (code >= 95)                                                     { type = 'storm'; icon = '⛈️'; text = 'Gewitter'; }
+    else if ((code >= 71 && code <= 77) || code === 85 || code === 86) { type = 'snow';  icon = '❄️'; text = 'Schnee'; }
+    else if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) { type = 'rain';  icon = '🌧️'; text = 'Regen'; }
+    else                                                                { type = 'clear'; icon = '✅'; text = 'Kein Niederschlag'; }
+    alertEl.className   = 'weather-alert ' + type;
+    alertEl.textContent = icon + ' ' + text + suffix;
+    alertEl.hidden      = false;
+  }
+
+  function _buildHourlyItem(h, opts) {
+    var o    = opts || {};
+    var item = document.createElement('div');
+    item.className = 'hourly-item' + (o.isFirst ? ' now' : '') + (o.isActive ? ' radar-active' : '');
+    item.setAttribute('role', 'listitem');
+    if (o.showDataTs) item.dataset.hourTs = String(h.time.getTime());
+
+    var timeLabel       = document.createElement('span');
+    timeLabel.className   = 'hourly-time';
+    timeLabel.textContent = o.isFirst ? 'Jetzt' : hourFmt.format(h.time);
+
+    var icon         = document.createElement('span');
+    icon.className   = 'hourly-icon';
+    icon.textContent = h.description.icon;
+    icon.title       = h.description.label;
+
+    var temp         = document.createElement('span');
+    temp.className   = 'hourly-temp';
+    temp.textContent = round(h.temperature) + '\u00B0';
+
+    var precip         = document.createElement('span');
+    precip.className   = 'hourly-precip';
+    var p = h.precipitationProbability;
+    precip.textContent = '💧 ' + (typeof p === 'number' ? p : 0) + '%';
+    precip.title       = 'Regenwahrscheinlichkeit';
+
+    item.appendChild(timeLabel);
+    item.appendChild(icon);
+    item.appendChild(temp);
+    item.appendChild(precip);
+    return item;
+  }
+
   // ---------- Hero ----------
   function renderHero(data) {
     const c     = data.current;
@@ -174,23 +220,11 @@
       .forEach(removeSkeleton);
 
     // Weather alert chip
-    const alertEl = document.getElementById('weather-alert');
-    if (alertEl) {
-      const code = today ? today.weatherCode : c.weatherCode;
-      let type, icon, text;
-      if (code >= 95) {
-        type = 'storm'; icon = '⛈️'; text = 'Gewitter heute';
-      } else if ((code >= 71 && code <= 77) || code === 85 || code === 86) {
-        type = 'snow'; icon = '❄️'; text = 'Schnee heute';
-      } else if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) {
-        type = 'rain'; icon = '🌧️'; text = 'Regen heute';
-      } else {
-        type = 'clear'; icon = '✅'; text = 'Kein Niederschlag heute';
-      }
-      alertEl.className = 'weather-alert ' + type;
-      alertEl.textContent = icon + ' ' + text;
-      alertEl.hidden = false;
-    }
+    _renderAlertChip(
+      document.getElementById('weather-alert'),
+      today ? today.weatherCode : c.weatherCode,
+      ' heute'
+    );
 
     // Rain timing chip
     const timingEl = document.getElementById('rain-timing');
@@ -274,15 +308,7 @@
       return;
     }
 
-    const now = new Date();
-    let startIdx = 0;
-    for (let i = 0; i < data.hourly.length; i++) {
-      if (data.hourly[i].time.getTime() >= now.getTime() - 30 * 60 * 1000) {
-        startIdx = i;
-        break;
-      }
-    }
-    const slice = data.hourly.slice(startIdx, Math.min(startIdx + 24, data.hourly.length));
+    const slice = getHourlySlice(data);
 
     // In-place update preserves scroll position on auto-refresh — only if items are fully rendered.
     const existing = Array.from(strip.querySelectorAll('.hourly-item'));
@@ -306,36 +332,11 @@
     // First render or count changed: full build via DocumentFragment.
     const frag = document.createDocumentFragment();
     slice.forEach(function (h, idx) {
-      const isActive = h.time.getTime() === _activeHourTs;
-      const item = document.createElement('div');
-      item.className = 'hourly-item' + (idx === 0 ? ' now' : '') + (isActive ? ' radar-active' : '');
-      item.setAttribute('role', 'listitem');
-      item.dataset.hourTs = String(h.time.getTime());
-
-      const timeLabel = document.createElement('span');
-      timeLabel.className   = 'hourly-time';
-      timeLabel.textContent = idx === 0 ? 'Jetzt' : hourFmt.format(h.time);
-
-      const icon = document.createElement('span');
-      icon.className   = 'hourly-icon';
-      icon.textContent = h.description.icon;
-      icon.title       = h.description.label;
-
-      const temp = document.createElement('span');
-      temp.className   = 'hourly-temp';
-      temp.textContent = round(h.temperature) + '\u00B0';
-
-      const precip = document.createElement('span');
-      precip.className   = 'hourly-precip';
-      const p = h.precipitationProbability;
-      precip.textContent = '💧 ' + (typeof p === 'number' ? p : 0) + '%';
-      precip.title       = 'Regenwahrscheinlichkeit';
-
-      item.appendChild(timeLabel);
-      item.appendChild(icon);
-      item.appendChild(temp);
-      item.appendChild(precip);
-      frag.appendChild(item);
+      frag.appendChild(_buildHourlyItem(h, {
+        isFirst:    idx === 0,
+        isActive:   h.time.getTime() === _activeHourTs,
+        showDataTs: true
+      }));
     });
 
     clearChildren(strip);
@@ -515,34 +516,7 @@
       strip.setAttribute('role', 'list');
 
       hourlySlice.forEach(function (h) {
-        const item = document.createElement('div');
-        item.className = 'hourly-item';
-        item.setAttribute('role', 'listitem');
-
-        const timeEl = document.createElement('span');
-        timeEl.className   = 'hourly-time';
-        timeEl.textContent = hourFmt.format(h.time);
-
-        const iconH = document.createElement('span');
-        iconH.className   = 'hourly-icon';
-        iconH.textContent = h.description.icon;
-        iconH.title       = h.description.label;
-
-        const tempEl = document.createElement('span');
-        tempEl.className   = 'hourly-temp';
-        tempEl.textContent = round(h.temperature) + '\u00B0';
-
-        const precipEl = document.createElement('span');
-        precipEl.className   = 'hourly-precip';
-        const p = h.precipitationProbability;
-        precipEl.textContent = '💧 ' + (typeof p === 'number' ? p : 0) + '%';
-        precipEl.title       = 'Regenwahrscheinlichkeit';
-
-        item.appendChild(timeEl);
-        item.appendChild(iconH);
-        item.appendChild(tempEl);
-        item.appendChild(precipEl);
-        strip.appendChild(item);
+        strip.appendChild(_buildHourlyItem(h, {}));
       });
       frag.appendChild(strip);
     }
@@ -943,18 +917,7 @@
       ? round(dayEntry.tempMax) + '\u00B0 / ' + round(dayEntry.tempMin) + '\u00B0' : '--';
 
     // Weather-alert chip — reflects hour's weather code
-    var alertEl = document.getElementById('weather-alert');
-    if (alertEl) {
-      var code = h.weatherCode;
-      var type, aIcon, text;
-      if (code >= 95)                                         { type = 'storm'; aIcon = '⛈️'; text = 'Gewitter'; }
-      else if ((code >= 71 && code <= 77) || code === 85 || code === 86) { type = 'snow'; aIcon = '❄️'; text = 'Schnee'; }
-      else if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) { type = 'rain'; aIcon = '🌧️'; text = 'Regen'; }
-      else                                                    { type = 'clear'; aIcon = '✅'; text = 'Kein Niederschlag'; }
-      alertEl.className   = 'weather-alert ' + type;
-      alertEl.textContent = aIcon + ' ' + text;
-      alertEl.hidden = false;
-    }
+    _renderAlertChip(document.getElementById('weather-alert'), h.weatherCode, '');
 
     // Hide rain-timing pill (relative to "now", not meaningful for a pinned time)
     var timingEl = document.getElementById('rain-timing');
