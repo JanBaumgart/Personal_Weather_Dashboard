@@ -13,8 +13,9 @@
   let lastLoadTime  = 0;
 
   // ---------- Favorites ----------
-  const FAV_KEY = 'weather_favorites';
-  const FAV_MAX = 8;
+  const FAV_KEY      = 'weather_favorites';
+  const FAV_MAX      = 8;
+  const LAST_LOC_KEY = 'weather_last_location';
 
   /**
    * Validate a favorite entry's shape before trusting it.
@@ -47,6 +48,24 @@
   }
   function _saveFavorites(list) {
     try { localStorage.setItem(FAV_KEY, JSON.stringify(list)); } catch (e) { /* quota */ }
+  }
+
+  function _saveLastLocation(loc) {
+    try {
+      localStorage.setItem(LAST_LOC_KEY, JSON.stringify({
+        name: loc.name, country: loc.country, lat: loc.lat, lon: loc.lon,
+        timezone: loc.timezone || 'Europe/Berlin',
+        displayName: loc.displayName
+      }));
+    } catch (e) { /* quota */ }
+  }
+
+  function _loadLastLocation() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(LAST_LOC_KEY));
+      if (_isValidFavorite(raw)) return raw;
+    } catch (e) { /* ignore */ }
+    return null;
   }
   function isFavorite(loc) {
     return loadFavorites().some(function (f) { return _sameLoc(f, loc); });
@@ -177,6 +196,7 @@
     const input = document.getElementById('search-input');
     if (input) input.value = '';
     WeatherAPI.setLocation(loc);
+    _saveLastLocation(loc);
     WeatherUI.setTimezone(loc.timezone);
     WeatherMap.moveMarker(loc.lat, loc.lon, loc.name);
     updateLabels(loc);
@@ -370,8 +390,16 @@
         timezone: String(params.get('timezone') || 'Europe/Berlin').slice(0, 50)
       };
       WeatherAPI.setLocation(urlLoc);
+      _saveLastLocation(urlLoc);
       WeatherUI.setTimezone(urlLoc.timezone);
       updateLabels(urlLoc);
+    } else {
+      const saved = _loadLastLocation();
+      if (saved) {
+        WeatherAPI.setLocation(saved);
+        WeatherUI.setTimezone(saved.timezone);
+        updateLabels(saved);
+      }
     }
 
     const loc = WeatherAPI.getLocation();

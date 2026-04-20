@@ -51,7 +51,7 @@ a:hover { text-decoration: underline; }
   z-index: 20;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  background: rgba(15, 17, 23, 0.75);
+  background: rgba(15, 17, 23, 0.85);
   border-bottom: 1px solid var(--border);
 }
 .header-inner {
@@ -387,7 +387,7 @@ a:hover { text-decoration: underline; }
   font-size: 4.5rem;
   font-weight: 700;
   line-height: 1;
-  background: linear-gradient(135deg, #fff 0%, #9ca3af 100%);
+  background: linear-gradient(135deg, #fff 0%, #6b7280 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -454,11 +454,11 @@ a:hover { text-decoration: underline; }
 }
 .map-cloud-btn {
   position: absolute;
-  bottom: 86px;
+  bottom: 96px;
   left: 10px;
   z-index: 2;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   background: rgba(15, 17, 23, 0.82);
   border: 2px solid rgba(0, 0, 0, 0.3);
   border-radius: var(--radius-sm);
@@ -476,11 +476,11 @@ a:hover { text-decoration: underline; }
 .map-cloud-btn[data-state="2"] { color: var(--text-dim); opacity: 0.6; }
 .map-radar-btn {
   position: absolute;
-  bottom: 48px;
+  bottom: 52px;
   left: 10px;
   z-index: 2;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   background: rgba(15, 17, 23, 0.82);
   border: 2px solid rgba(0, 0, 0, 0.3);
   border-radius: var(--radius-sm);
@@ -526,8 +526,8 @@ a:hover { text-decoration: underline; }
   bottom: 10px;
   left: 10px;
   z-index: 2;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   background: rgba(15, 17, 23, 0.82);
   border: 2px solid rgba(0, 0, 0, 0.3);
   border-radius: var(--radius-sm);
@@ -767,6 +767,7 @@ a:hover { text-decoration: underline; }
   border-color: var(--accent);
   background: linear-gradient(180deg, rgba(56, 189, 248, 0.1), var(--bg-soft));
   transform: translateY(-4px);
+  box-shadow: 0 0 0 2px var(--accent), inset 0 0 0 1px rgba(56, 189, 248, 0.2);
 }
 
 /* ---------- Day Detail Panel ---------- */
@@ -815,7 +816,7 @@ a:hover { text-decoration: underline; }
   color: transparent !important;
   background: linear-gradient(90deg, var(--bg-soft) 25%, #202540 50%, var(--bg-soft) 75%);
   background-size: 200% 100%;
-  animation: shimmer 1.4s ease-in-out infinite;
+  animation: shimmer 2.2s ease-in-out infinite;
   border-radius: var(--radius-sm);
 }
 .skeleton-text { min-height: 1em; display: inline-block; min-width: 60px; }
@@ -863,6 +864,8 @@ a:hover { text-decoration: underline; }
 .view-switch-btn:not(.active):hover {
   background: var(--card-hover);
   color: var(--text);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.15);
 }
 
 /* ---------- Temperature Chart ---------- */
@@ -1065,31 +1068,120 @@ a:hover { text-decoration: underline; }
 }
 .hourly-item.radar-active .hourly-time { color: var(--accent-2); font-weight: 600; }
 
+/* ---------- Safe area (notch / Dynamic Island) ---------- */
+.site-header {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
 /* ---------- Responsive ---------- */
+@media (max-width: 1100px) {
+  .daily-grid { grid-template-columns: repeat(5, 1fr); }
+}
 @media (max-width: 960px) {
   .row-two-col { grid-template-columns: 1fr; }
   .hero { grid-template-columns: 1fr; gap: 24px; }
   .daily-grid { grid-template-columns: repeat(4, 1fr); }
 }
+@media (max-width: 768px) {
+  .daily-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* ---------- Mobile (≤640 px / iPhone 14 Pro = 393 px) ---------- */
 @media (max-width: 640px) {
-  .container { padding: 16px; gap: 16px; }
-  .card { padding: 18px; }
-  .header-inner { padding: 12px 16px; }
+
+  /* --- Header: 2-row grid — brand+meta top, search full-width below --- */
+  .header-inner {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "brand meta"
+      "search search";
+    padding: 10px 16px;
+    gap: 8px 12px;
+  }
+  .brand        { grid-area: brand; min-width: 0; }
+  .search-wrapper {
+    grid-area: search;
+    max-width: 100%;
+    flex: unset;
+    width: 100%;
+  }
+  .header-meta  { grid-area: meta; align-items: center; }
+  .last-updated { display: none; }
   .brand-text h1 { font-size: 1.1rem; }
-  .subtitle { font-size: 0.78rem; }
+  .subtitle      { font-size: 0.78rem; }
+  .refresh-btn span { display: none; }
+  .refresh-btn {
+    padding: 0;
+    width: 40px;
+    height: 40px;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+  }
+
+  /* --- Container & cards --- */
+  .container {
+    padding: 12px 16px;
+    padding-left:  max(16px, env(safe-area-inset-left,  16px));
+    padding-right: max(16px, env(safe-area-inset-right, 16px));
+    gap: 14px;
+  }
+  .card { padding: 16px; }
+
+  /* --- Hero --- */
   .hero-icon { font-size: 4.2rem; }
   .hero-temp { font-size: 3.4rem; }
-  .hero-right { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .stat { padding: 10px 12px; }
-  .stat-value { font-size: 1rem; }
-  .daily-grid { grid-template-columns: repeat(2, 1fr); }
+  .hero-main { gap: 16px; }
+  .location  { margin-bottom: 12px; }
+  /* 3-col stats: 6 stat tiles → 2 neat rows instead of 3 */
+  .hero-right {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .stat       { padding: 10px 8px; }
+  .stat-label { font-size: 0.67rem; }
+  .stat-value { font-size: 0.95rem; }
+  .stat-meta  { font-size: 0.67rem; }
+
+  /* --- Hourly card: stack title + view-switch on separate rows --- */
+  .hourly-card .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  /* Bigger touch target for view-switch buttons */
+  .view-switch-btn {
+    min-height: 36px;
+    padding: 8px 16px;
+  }
+  /* Hide scrollbar on touch (swipe to scroll) */
+  .hourly-strip           { scrollbar-width: none; padding-bottom: 0; }
+  .hourly-strip::-webkit-scrollbar { display: none; }
+
+  /* --- Daily grid --- */
+  .daily-grid  { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .daily-item  { padding: 14px 8px; }
+  .daily-icon  { font-size: 2rem; }
+
+  /* --- Sun card --- */
   .sun-times { grid-template-columns: repeat(3, 1fr); }
+  .sun-time  { padding: 8px 4px; }
+
+  /* --- Map --- */
   .map-wrap { height: 260px; }
-  .refresh-btn span { display: none; }
-  .refresh-btn { padding: 8px 10px; }
+
+  /* --- Footer safe area --- */
+  .site-footer {
+    padding-bottom: max(24px, calc(env(safe-area-inset-bottom, 0px) + 16px));
+  }
 }
+
+/* ---------- Very small screens (≤400 px) ---------- */
 @media (max-width: 400px) {
+  .hero-main  { gap: 12px; }
+  .hero-icon  { font-size: 3.8rem; }
+  .hero-temp  { font-size: 3rem; }
+  /* 3 cols is tight at 375 px — fall back to 2 cols */
+  .hero-right { grid-template-columns: repeat(2, 1fr); }
   .daily-grid { grid-template-columns: 1fr 1fr; }
-  .hero-main { flex-direction: row; gap: 14px; }
-  .hero-temp { font-size: 3rem; }
 }
