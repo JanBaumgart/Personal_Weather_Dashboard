@@ -51,6 +51,8 @@ Leaflet 1.9.4 ist **lokal vendored** unter `vendor/leaflet-1.9.4/` (CSS + JS). K
 
 ```
 weather-dashboard/
+├── api/
+│   └── owm-key.js       # Vercel Serverless Function — liefert OWM_API_KEY aus Env Var
 ├── index.html
 ├── css/style.css
 ├── js/
@@ -64,7 +66,7 @@ weather-dashboard/
 └── Wetter Dashboard beenden.vbs
 ```
 
-`config.js` enthält den OpenWeatherMap-Key für Cloud/Radar-Overlays. Die Datei ist gitignored und nicht auf Vercel — ohne sie fehlen nur die Overlay-Layer, das Dashboard funktioniert.
+`config.js` enthält den OpenWeatherMap-Key lokal (gitignored). Auf Vercel wird der Key über `api/owm-key.js` als Env Var `OWM_API_KEY` bereitgestellt. `map.js:initCloudLayer()` prüft zuerst `window.WD_CONFIG` (lokal), fetcht sonst von `/api/owm-key` (Produktion, `Cache-Control: private, no-store`). Ohne Key wird der Cloud-Button ausgeblendet.
 
 ## Architecture
 
@@ -74,8 +76,8 @@ The app uses an **IIFE + `window.*` global namespace** pattern instead of ES mod
 
 | File | Responsibility |
 |------|---------------|
-| `js/weather.js` | Open-Meteo + Bright Sky API fetch, WMO code table, raw→internal data shape, geocoding, dynamic location state. Exposes `window.WeatherAPI` (`fetchWeather`, `fetchAlerts`, `describeWeather`, `geocode`, `setLocation`, `getLocation`, `DEFAULT_LOCATION`). |
-| `js/map.js` | Leaflet map init (centred on Germany), marker, live popup update, fly-to animation on location change, OWM overlay layers, scale control. Exposes `window.WeatherMap` (`initMap`, `moveMarker`, `updateMarkerPopup`, `initMapExpand`). |
+| `js/weather.js` | Open-Meteo + Bright Sky API fetch, WMO code table, raw→internal data shape, geocoding, dynamic location state. Exposes `window.WeatherAPI` (`fetchWeather`, `fetchCurrentForLoc`, `fetchAlerts`, `describeWeather`, `geocode`, `setLocation`, `getLocation`, `DEFAULT_LOCATION`). |
+| `js/map.js` | Leaflet map init (centred on Germany), marker, live popup update, fly-to animation on location change, OWM overlay layers, scale control, fav markers. Exposes `window.WeatherMap` (`initMap`, `moveMarker`, `updateMarkerPopup`, `initMapExpand`, `setFavMarkers`, `setRadarFrame`, `resetRadarFrame`, `initAnimation`, `initCloudLayer`, `initRadarLayer`). |
 | `js/ui.js` | All DOM rendering: hero (incl. dynamic title), alerts section, sun arc, hourly strip/chart, daily grid, day detail panel. Exposes `window.WeatherUI`. |
 | `js/app.js` | Orchestration: fetches weather + alerts in parallel via `Promise.allSettled`, wires refresh button and search form, 10-min auto-refresh with 30s debounce on tab-visibility, label updates on location change. |
 
@@ -104,7 +106,10 @@ The app uses an **IIFE + `window.*` global namespace** pattern instead of ES mod
 - **Radar-Frame-Scrubbing**: Gleichzeitig mit dem Time-Peek wird auf der Karte der zeitlich nächste RainViewer-Frame angezeigt. Verfügbares Fenster: ca. ±100 Minuten (Vergangenheit + Nowcast). Liegt die gewählte Stunde außerhalb → Toast "Keine Radardaten für diese Zeit verfügbar". OWM-Cloud-Layer und -Button werden bei aktivem Frame ausgeblendet und bei Reset wiederhergestellt. State in `map.js`: `_framePinned`, `_allFrames`, `_liveFramePath`, `_currentHost`, `_cloudHiddenForFrame`. Öffentliche API: `WeatherMap.setRadarFrame(msTimestamp)` → bool, `WeatherMap.resetRadarFrame()`.
 - **Radar-Animation** (nur im maximierten Kartenzustand): Button "▶ Abspielen" erscheint unten-mitte auf der Karte wenn `.map-expanded` aktiv ist (CSS `display:none` → `display:flex`). Animiert alle RainViewer-Frames (past + nowcast, typisch ~15 Frames) mit 1 Sek./Frame. Zeit-Overlay (`div.map-time-overlay`, top-center der Karte) zeigt `"HH:mm Uhr"` für Vergangenheits-Frames und `"HH:mm Uhr · Prognose"` (gelb, `.map-time-overlay--nowcast`) für Nowcast-Frames (`_animIdx > _pastFrameCount`). `initAnimation()` erstellt den Button einmalig; `_startAnimation()` / `_stopAnimation()` steuern den Ablauf. Nach Animation-Ende automatischer Reset auf Live-Frame.
 - **Niederschlagsbalken im Chart**: Die Balken liegen jetzt **innerhalb** der Temperaturkurve (nicht am unteren Rand), wachsen von unten nach oben proportional zur Wahrscheinlichkeit (max. volle Plotfläche = 100 %). Opacity `rgba(56,189,248,0.13)` — subtil hinter der Kurve. Aktive Spalte erhält halbtransparenten teal-Highlight-Rect (unter allen anderen Elementen). Invisible Hit-Rects (`data-hour-ts`) über die gesamte Chart-Höhe ermöglichen Klick auf jede Stunden-Spalte.
-- **Stündliche Felder (erweitert)**: `weather.js:buildApiUrl` holt jetzt auch `apparent_temperature, wind_speed_10m, relative_humidity_2m, uv_index, precipitation` stündlich. Alle Felder sind in jedem Hourly-Objekt als `apparent`, `windSpeed`, `humidity`, `uvIndex`, `precipitation` verfügbar (null wenn nicht geliefert).
+- **Stündliche Felder (erweitert)**: `weather.js:buildApiUrl` holt stündlich `apparent_temperature, wind_speed_10m, wind_direction_10m, relative_humidity_2m, uv_index, precipitation, precipitation_probability, weather_code`. Current-Payload enthält außerdem `wind_direction_10m`. Alle Felder in jedem Hourly-Objekt: `apparent`, `windSpeed`, `windDirection`, `humidity`, `uvIndex`, `precipitation`, `precipitationProbability` (null wenn nicht geliefert).
+- **Wind / UV im Hero**: `ui.js` berechnet aus `c.windDirection` (°) einen 8-Punkt-Richtungspfeil (↑↗→↘↓↙←↖, zeigt Windrichtung wohin) + Kompass-Kürzel (N/NO/O/SO/S/SW/W/NW). `beaufort(kmh)` liefert Bft-Zahl (0–12). Anzeige in `#stat-wind` + `#stat-wind-meta` (z.B. `↗ 24 km/h` / `Bft 5 · SW`). UV-Risiko-Label (`uvRisk(idx)`) zeigt Niedrig/Mittel/Hoch/Sehr hoch/Extrem in `#stat-uv-meta`. Beide Meta-Spans sind neue HTML-Elemente mit CSS-Klasse `.stat-meta`.
+- **URL Deep-Link**: `app.js:init()` liest `URLSearchParams` (`?lat=&lon=&name=&country=&timezone=`). Wenn lat/lon gültig (bounds-check) und name nicht leer → `WeatherAPI.setLocation()` vor Map-Init, sodass Karte direkt zentriert öffnet. Beispiel: `?lat=48.137&lon=11.576&name=München&country=DE&timezone=Europe/Berlin`. Kein Backend nötig, kein API-Layer-Eingriff.
+- **Favoriten-Marker auf der Karte**: `map.js:setFavMarkers(favorites, weatherMap)` rendert Amber-Marker (28×28 px, Gradient #fbbf24→#f97316, `.fav-marker`) für alle Favoriten. Aktiver Standort wird übersprungen (< 0.01° Abstand). Klick dispatcht Custom-Event `wd:pick-location` → `app.js:pickLocation()`. `app.js:_syncFavMarkers()` ist async und fetcht parallel für jeden Favoriten per `WeatherAPI.fetchCurrentForLoc(fav)` (nur `temperature_2m,weather_code`, kein Side-Effect auf `activeLocation`). Das Marker-Icon zeigt das Wetter-Emoji; der Tooltip zeigt Name + `⛅ 18° · Teils bewölkt`. Sync wird aufgerufen bei: `init()`, jedem `loadAndRender()` (fire-and-forget), `pickLocation()`, Stern-Toggle. `weather.js:fetchCurrentForLoc(loc)` ist der neue lightweight Fetch für beliebige Koordinaten ohne State-Mutation.
 
 
 ## Security & Datenschutz
@@ -115,5 +120,5 @@ The app uses an **IIFE + `window.*` global namespace** pattern instead of ES mod
 - Severity-Felder der Bright Sky API werden via Whitelist validiert; Texte sind auf 100–2000 Zeichen begrenzt
 - Geocoding-Eingabe: query trimmed + max 100 Zeichen, Ergebnisfelder je auf 60–100 Zeichen begrenzt, kein innerHTML — ausschließlich `textContent`
 - RainViewer `data.host` wird via Regex gegen `tilecache.rainviewer.com` validiert bevor URLs gebaut werden
-- OWM API Key (`js/config.js`) ist gitignored und **nicht auf Vercel deployed** — ohne die Datei wird der Cloud-Button automatisch ausgeblendet (`btn.hidden = true`). `.gitignore` schützt nur vor Git-Commits, nicht vor lokalem Zugriff — Key bei OWM per HTTP-Referrer auf die Live-URL beschränken falls nötig
+- OWM API Key: lokal in `js/config.js` (gitignored), auf Vercel als Env Var `OWM_API_KEY` über `api/owm-key.js` bereitgestellt. Key nie im Git-Repo. Der Key ist in OWM-Tile-Request-URLs im Browser-Netzwerk sichtbar — das ist bei direkten Tile-Requests unvermeidbar. OWM HTTP-Referrer-Restriction ist auf Free-Plan nicht verfügbar.
 - CSP in `index.html`: `img-src` enthält `tilecache.rainviewer.com`, `connect-src` enthält `api.rainviewer.com` — bereits korrekt gesetzt

@@ -9,6 +9,7 @@
 
   let mapInstance    = null;
   let markerInstance = null;
+  var _favMarkers    = {}; // key: "lat.toFixed(4),lon.toFixed(4)"
 
   var _overlayOpacity = { cloud: 0, radar: 0 };
   var _overlayLayers  = { cloud: null, radar: null };
@@ -24,6 +25,7 @@
   var _animBtn             = null;
   var _animTimerId         = null;
   var _animIdx             = 0;
+  var _timeOverlayFmt = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Berlin' });
 
   // ---------- Map init ----------
   function initMap(opts) {
@@ -215,7 +217,7 @@
       var img = new Image();
       var done = false;
       var timeout = setTimeout(function () { if (!done) { done = true; reject(new Error('probe timeout')); } }, 6000);
-      img.onload  = function () { if (!done) { done = true; clearTimeout(timeout); resolve(true); } };
+      img.onload  = function () { if (!done) { done = true; clearTimeout(timeout); resolve(); } };
       img.onerror = function () { if (!done) { done = true; clearTimeout(timeout); reject(new Error('probe load failed')); } };
       img.src = url;
     });
@@ -284,8 +286,7 @@
 
     function _loadFrame(isInitial) {
       return _fetchFrameUrl().then(function (tileUrl) {
-        return _probeRadarTile(tileUrl).then(function (ok) {
-          if (!ok) { if (isInitial) _disableLayer(); return; }
+        return _probeRadarTile(tileUrl).then(function () {
           _startOrRefresh(tileUrl, isInitial);
         });
       });
@@ -331,9 +332,8 @@
   function _showTimeOverlay(tsSeconds, isNowcast) {
     var el = _getOrCreateTimeOverlay();
     if (!el) return;
-    var d   = new Date(tsSeconds * 1000);
-    var fmt = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Berlin' });
-    el.textContent = fmt.format(d) + ' Uhr' + (isNowcast ? ' · Prognose' : '');
+    var d = new Date(tsSeconds * 1000);
+    el.textContent = _timeOverlayFmt.format(d) + ' Uhr' + (isNowcast ? ' · Prognose' : '');
     el.classList.toggle('map-time-overlay--nowcast', !!isNowcast);
     el.classList.add('map-time-overlay--visible');
   }
@@ -484,6 +484,54 @@
     });
   }
 
+  function _favIcon(weatherIcon) {
+    var icon = weatherIcon || '&#9733;';
+    return L.divIcon({
+      className: '',
+      html: '<div class="fav-marker">' + icon + '</div>',
+      iconSize:    [28, 28],
+      iconAnchor:  [14, 14],
+      popupAnchor: [0, -16]
+    });
+  }
+
+  function setFavMarkers(favorites, weatherMap) {
+    if (!mapInstance) return;
+    Object.keys(_favMarkers).forEach(function(k) {
+      mapInstance.removeLayer(_favMarkers[k]);
+    });
+    _favMarkers = {};
+    if (!Array.isArray(favorites)) return;
+    var wm = weatherMap || {};
+    favorites.forEach(function(fav) {
+      if (markerInstance) {
+        var pos = markerInstance.getLatLng();
+        if (Math.abs(pos.lat - fav.lat) < 0.01 && Math.abs(pos.lng - fav.lon) < 0.01) return;
+      }
+      var key = fav.lat.toFixed(4) + ',' + fav.lon.toFixed(4);
+      var w = wm[key];
+      var weatherIcon = w ? w.description.icon : null;
+      var m = L.marker([fav.lat, fav.lon], { icon: _favIcon(weatherIcon) });
+
+      var tooltipEl = document.createElement('div');
+      var nameDiv = document.createElement('div');
+      nameDiv.textContent = fav.displayName || (fav.name + (fav.country ? ', ' + fav.country : ''));
+      tooltipEl.appendChild(nameDiv);
+      if (w) {
+        var weatherDiv = document.createElement('span');
+        weatherDiv.className = 'fav-tt-weather';
+        weatherDiv.textContent = w.description.icon + ' ' + Math.round(w.temperature) + '\u00B0 \u00B7 ' + w.description.label;
+        tooltipEl.appendChild(weatherDiv);
+      }
+      m.bindTooltip(tooltipEl, { direction: 'top', offset: [0, -8] });
+      m.on('click', function() {
+        document.dispatchEvent(new CustomEvent('wd:pick-location', { detail: fav }));
+      });
+      m.addTo(mapInstance);
+      _favMarkers[key] = m;
+    });
+  }
+
   window.WeatherMap = {
     initMap:           initMap,
     initMapExpand:     initMapExpand,
@@ -493,6 +541,7 @@
     moveMarker:        moveMarker,
     updateMarkerPopup: updateMarkerPopup,
     setRadarFrame:     setRadarFrame,
-    resetRadarFrame:   resetRadarFrame
+    resetRadarFrame:   resetRadarFrame,
+    setFavMarkers:     setFavMarkers
   };
 })();

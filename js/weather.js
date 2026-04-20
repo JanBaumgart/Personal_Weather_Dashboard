@@ -31,9 +31,9 @@
   function buildApiUrl(loc) {
     return 'https://api.open-meteo.com/v1/forecast' +
       '?latitude='  + loc.lat + '&longitude=' + loc.lon +
-      '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,apparent_temperature,precipitation,weather_code,uv_index' +
+      '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,apparent_temperature,precipitation,weather_code,uv_index' +
       '&daily=temperature_2m_max,temperature_2m_min,weather_code,sunrise,sunset,uv_index_max,precipitation_sum' +
-      '&hourly=temperature_2m,apparent_temperature,wind_speed_10m,relative_humidity_2m,uv_index,precipitation,weather_code,precipitation_probability' +
+      '&hourly=temperature_2m,apparent_temperature,wind_speed_10m,wind_direction_10m,relative_humidity_2m,uv_index,precipitation,weather_code,precipitation_probability' +
       '&timezone=' + encodeURIComponent(loc.timezone || 'Europe/Berlin') +
       '&timeformat=unixtime' +
       '&forecast_days=7' +
@@ -192,6 +192,7 @@
       apparent:      c.apparent_temperature,
       humidity:      c.relative_humidity_2m,
       windSpeed:     c.wind_speed_10m,
+      windDirection: c.wind_direction_10m,
       precipitation: c.precipitation,
       uvIndex:       c.uv_index,
       weatherCode:   c.weather_code,
@@ -229,6 +230,7 @@
       temperature_2m:           hourlyTemp     = [],
       apparent_temperature:     hourlyApparent = [],
       wind_speed_10m:           hourlyWind     = [],
+      wind_direction_10m:       hourlyWindDir  = [],
       relative_humidity_2m:     hourlyHumidity = [],
       uv_index:                 hourlyUv       = [],
       precipitation:            hourlyPrecipMm = [],
@@ -242,6 +244,7 @@
         temperature:             hourlyTemp[i]     ?? null,
         apparent:                hourlyApparent[i] ?? null,
         windSpeed:               hourlyWind[i]     ?? null,
+        windDirection:           hourlyWindDir[i]  ?? null,
         humidity:                hourlyHumidity[i] ?? null,
         uvIndex:                 hourlyUv[i]       ?? null,
         precipitation:           hourlyPrecipMm[i] ?? null,
@@ -266,13 +269,31 @@
     };
   }
 
+  async function fetchCurrentForLoc(loc) {
+    const url = 'https://api.open-meteo.com/v1/forecast' +
+      '?latitude='  + loc.lat + '&longitude=' + loc.lon +
+      '&current=temperature_2m,weather_code' +
+      '&timezone='  + encodeURIComponent(loc.timezone || 'Europe/Berlin') +
+      '&timeformat=unixtime';
+    const resp = await fetchWithTimeout(url, 10000);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const c = data.current || {};
+    return {
+      temperature:  c.temperature_2m,
+      weatherCode:  c.weather_code,
+      description:  describeWeather(c.weather_code)
+    };
+  }
+
   window.WeatherAPI = {
-    DEFAULT_LOCATION: DEFAULT_LOCATION,
-    getLocation:      getLocation,
-    setLocation:      setLocation,
-    fetchWeather:     fetchWeather,
-    fetchAlerts:      fetchAlerts,
-    describeWeather:  describeWeather,
-    geocode:          geocode
+    DEFAULT_LOCATION:    DEFAULT_LOCATION,
+    getLocation:         getLocation,
+    setLocation:         setLocation,
+    fetchWeather:        fetchWeather,
+    fetchCurrentForLoc:  fetchCurrentForLoc,
+    fetchAlerts:         fetchAlerts,
+    describeWeather:     describeWeather,
+    geocode:             geocode
   };
 })();

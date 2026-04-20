@@ -66,6 +66,32 @@
   // Currently active hourly timestamp (ms) for radar frame scrubbing; null = live.
   let _activeHourTs = null;
 
+  // ---------- Wind / UV helpers ----------
+  const _WIND_ARROWS  = ['↓','↙','←','↖','↑','↗','→','↘'];
+  const _WIND_COMPASS = ['N','NO','O','SO','S','SW','W','NW'];
+
+  function windDirArrow(deg) {
+    if (typeof deg !== 'number' || isNaN(deg)) return { arrow: '', compass: '' };
+    var idx = Math.round(((deg % 360) + 360) % 360 / 45) % 8;
+    return { arrow: _WIND_ARROWS[idx], compass: _WIND_COMPASS[idx] };
+  }
+
+  function beaufort(kmh) {
+    if (typeof kmh !== 'number' || isNaN(kmh)) return null;
+    return kmh < 1 ? 0 : kmh < 6 ? 1 : kmh < 12 ? 2 : kmh < 20 ? 3 :
+           kmh < 29 ? 4 : kmh < 39 ? 5 : kmh < 50 ? 6 : kmh < 62 ? 7 :
+           kmh < 75 ? 8 : kmh < 89 ? 9 : kmh < 103 ? 10 : kmh < 118 ? 11 : 12;
+  }
+
+  function uvRisk(idx) {
+    if (typeof idx !== 'number' || isNaN(idx)) return '';
+    if (idx < 3)  return 'Niedrig';
+    if (idx < 6)  return 'Mittel';
+    if (idx < 8)  return 'Hoch';
+    if (idx < 11) return 'Sehr hoch';
+    return 'Extrem';
+  }
+
   // ---------- Rain timing helper ----------
   const PRECIP_THRESHOLD = 40; // % probability minimum
   function isPrecipCode(code) {
@@ -211,9 +237,15 @@
     statHighLow.textContent  = today
       ? round(today.tempMax) + '\u00B0 / ' + round(today.tempMin) + '\u00B0'
       : '--';
-    statWind.textContent     = round(c.windSpeed) + ' km/h';
+    const wd  = windDirArrow(c.windDirection);
+    const bft = beaufort(c.windSpeed);
+    statWind.textContent = (wd.arrow ? wd.arrow + '\u00A0' : '') + round(c.windSpeed) + ' km/h';
+    const windMeta = document.getElementById('stat-wind-meta');
+    if (windMeta) windMeta.textContent = bft !== null ? 'Bft\u00A0' + bft + (wd.compass ? '\u00A0\u00B7\u00A0' + wd.compass : '') : '';
     statHumidity.textContent = round(c.humidity) + ' %';
     statUv.textContent       = fmtNum(c.uvIndex, 1);
+    const uvMeta = document.getElementById('stat-uv-meta');
+    if (uvMeta) uvMeta.textContent = uvRisk(c.uvIndex);
     statPrecip.textContent   = fmtNum(c.precipitation, 1) + ' mm';
 
     [heroIcon, heroTemp, heroDesc, statFeels, statHighLow, statWind, statHumidity, statUv, statPrecip]
@@ -899,9 +931,20 @@
     if (heroTemp)     heroTemp.textContent     = round(h.temperature) + '\u00B0';
     if (heroDesc)     heroDesc.textContent     = h.description.label;
     if (statFeels)    statFeels.textContent    = h.apparent    !== null ? round(h.apparent)  + '\u00B0'  : '--';
-    if (statWind)     statWind.textContent     = h.windSpeed   !== null ? round(h.windSpeed) + ' km/h'   : '--';
+    if (statWind) {
+      var hWd = windDirArrow(h.windDirection);
+      var hBft = h.windSpeed !== null ? beaufort(h.windSpeed) : null;
+      statWind.textContent = h.windSpeed !== null
+        ? (hWd.arrow ? hWd.arrow + '\u00A0' : '') + round(h.windSpeed) + ' km/h' : '--';
+      var hwMeta = document.getElementById('stat-wind-meta');
+      if (hwMeta) hwMeta.textContent = hBft !== null ? 'Bft\u00A0' + hBft + (hWd.compass ? '\u00A0\u00B7\u00A0' + hWd.compass : '') : '';
+    }
     if (statHumidity) statHumidity.textContent = h.humidity    !== null ? round(h.humidity)  + ' %'      : '--';
-    if (statUv)       statUv.textContent       = h.uvIndex     !== null ? fmtNum(h.uvIndex, 1)           : '--';
+    if (statUv) {
+      statUv.textContent = h.uvIndex !== null ? fmtNum(h.uvIndex, 1) : '--';
+      var huvMeta = document.getElementById('stat-uv-meta');
+      if (huvMeta) huvMeta.textContent = h.uvIndex !== null ? uvRisk(h.uvIndex) : '';
+    }
     if (statPrecip)   statPrecip.textContent   = h.precipitation !== null ? fmtNum(h.precipitation, 1) + ' mm' : '--';
 
     // High/Low from the daily entry that covers this hour's calendar day
@@ -973,7 +1016,8 @@
         item.classList.toggle('radar-active', ts !== null && itemTs === ts);
       });
     }
-    if (_lastData) renderTempChart(_lastData);
+    var chart = document.getElementById('hourly-chart');
+    if (_lastData && chart && !chart.hidden) renderTempChart(_lastData);
   }
 
   function initHourlyMapClick() {

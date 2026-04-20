@@ -22,12 +22,16 @@
    * corrupt entry with non-numeric lat/lon would propagate NaN into Leaflet and
    * into API URLs, so we filter aggressively on load.
    */
+  var _IANA_TZ_RE = /^[A-Za-z_]+(?:\/[A-Za-z_0-9+\-]+){0,2}$/;
+
   function _isValidFavorite(f) {
     return f && typeof f === 'object'
       && typeof f.name === 'string' && f.name.length > 0 && f.name.length <= 100
       && typeof f.country === 'string' && f.country.length <= 10
       && typeof f.lat === 'number' && isFinite(f.lat) && f.lat >= -90 && f.lat <= 90
-      && typeof f.lon === 'number' && isFinite(f.lon) && f.lon >= -180 && f.lon <= 180;
+      && typeof f.lon === 'number' && isFinite(f.lon) && f.lon >= -180 && f.lon <= 180
+      && (f.timezone === undefined || (typeof f.timezone === 'string' && f.timezone.length <= 50 && _IANA_TZ_RE.test(f.timezone)))
+      && (f.displayName === undefined || (typeof f.displayName === 'string' && f.displayName.length <= 200));
   }
 
   function _sameLoc(a, b) {
@@ -83,6 +87,19 @@
     return true;
   }
 
+  async function _syncFavMarkers() {
+    const favs = loadFavorites();
+    const weatherMap = {};
+    await Promise.allSettled(favs.map(async function(fav) {
+      try {
+        const key = fav.lat.toFixed(4) + ',' + fav.lon.toFixed(4);
+        const w = await WeatherAPI.fetchCurrentForLoc(fav);
+        weatherMap[key] = w;
+      } catch (e) { /* silent fail — marker still shows without weather */ }
+    }));
+    WeatherMap.setFavMarkers(favs, weatherMap);
+  }
+
   function updateSubtitleStar() {
     var btn = document.getElementById('subtitle-fav-btn');
     if (!btn) return;
@@ -120,6 +137,7 @@
       WeatherUI.renderDaily(data);
       WeatherUI.renderUpdatedAt(data.fetchedAt);
       WeatherMap.updateMarkerPopup(data.current, data.location && data.location.name);
+      _syncFavMarkers(); // fire-and-forget: refreshes fav marker icons + tooltips
 
       if (alertsResult.status === 'fulfilled') {
         WeatherUI.renderAlerts(alertsResult.value);
@@ -163,6 +181,7 @@
     WeatherMap.moveMarker(loc.lat, loc.lon, loc.name);
     updateLabels(loc);
     updateSubtitleStar();
+    _syncFavMarkers();
     loadAndRender();
   }
 
@@ -189,6 +208,7 @@
       starBtn.classList.toggle('active', nowFav);
       starBtn.setAttribute('aria-label', nowFav ? 'Aus Favoriten entfernen' : 'Als Favorit speichern');
       updateSubtitleStar();
+      _syncFavMarkers();
       // If viewing favorites and this one was removed, refresh the dropdown
       if (!nowFav) {
         const inp = document.getElementById('search-input');
@@ -215,9 +235,10 @@
   function showSuggestions(results) {
     const list = document.getElementById('search-suggestions');
     if (!list) return;
+    const favs = loadFavorites();
     list.innerHTML = '';
     results.forEach(function (r) {
-      list.appendChild(_buildSuggestionItem(r, isFavorite(r)));
+      list.appendChild(_buildSuggestionItem(r, favs.some(function(f){ return _sameLoc(f, r); })));
     });
     list.hidden = false;
     _suggestionsVisible = true;
@@ -334,16 +355,41 @@
    * Initialise the map once, then start the data loop.
    */
   function init() {
+    // Deep-link: ?lat=48.1&lon=11.6&name=München&country=DE&timezone=Europe/Berlin
+    const params = new URLSearchParams(window.location.search);
+    const pLat  = parseFloat(params.get('lat'));
+    const pLon  = parseFloat(params.get('lon'));
+    const pName = String(params.get('name') || '').trim().slice(0, 100);
+    if (isFinite(pLat) && pLat >= -90 && pLat <= 90 &&
+        isFinite(pLon) && pLon >= -180 && pLon <= 180 && pName) {
+      const urlLoc = {
+        name:     pName,
+        country:  String(params.get('country')  || '').trim().slice(0, 10),
+        lat:      pLat,
+        lon:      pLon,
+        timezone: String(params.get('timezone') || 'Europe/Berlin').slice(0, 50)
+      };
+      WeatherAPI.setLocation(urlLoc);
+      WeatherUI.setTimezone(urlLoc.timezone);
+      updateLabels(urlLoc);
+    }
+
     const loc = WeatherAPI.getLocation();
     try {
       WeatherMap.initMap({ lat: loc.lat, lon: loc.lon });
       WeatherMap.initMapExpand();
       WeatherMap.initCloudLayer();
       WeatherMap.initRadarLayer();
+      _syncFavMarkers();
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[WeatherDashboard] Map init failed:', err);
     }
+
+    // Fav-marker click navigates to that location
+    document.addEventListener('wd:pick-location', function(e) {
+      pickLocation(e.detail);
+    });
 
     // Wire up refresh button
     const refreshBtn = document.getElementById('refresh-btn');
@@ -359,6 +405,7 @@
       favBtn.addEventListener('click', function () {
         toggleFavorite(WeatherAPI.getLocation());
         updateSubtitleStar();
+        _syncFavMarkers();
       });
     }
     updateSubtitleStar();
@@ -366,7 +413,7 @@
     initSearch();
     WeatherUI.initHourlyToggle();
     WeatherUI.initHourlyMapClick();
-    try { WeatherMap.initAnimation(); } catch (e) { /* no radar available */ }
+    WeatherMap.initAnimation();
     loadAndRender();
 
     // Start periodic refresh
