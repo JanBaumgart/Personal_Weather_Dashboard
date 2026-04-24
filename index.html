@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="color-scheme" content="dark" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://tilecache.rainviewer.com https://tile.openweathermap.org; connect-src 'self' https://api.open-meteo.com https://geocoding-api.open-meteo.com https://api.brightsky.dev https://api.rainviewer.com; font-src 'self'; object-src 'none'; base-uri 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://tilecache.rainviewer.com https://tile.openweathermap.org; connect-src 'self' https://api.open-meteo.com https://geocoding-api.open-meteo.com https://air-quality-api.open-meteo.com https://api.brightsky.dev https://api.rainviewer.com https://nominatim.openstreetmap.org; font-src 'self'; object-src 'none'; base-uri 'self';">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>Weather Dashboard — Nuremberg</title>
 
@@ -44,6 +44,15 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="11" cy="11" r="8"/>
               <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+          </button>
+          <button id="gps-btn" class="search-btn gps-btn" type="button" aria-label="Meinen Standort verwenden" title="Meinen Standort verwenden">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"/>
+              <line x1="12" y1="2" x2="12" y2="6"/>
+              <line x1="12" y1="18" x2="12" y2="22"/>
+              <line x1="2" y1="12" x2="6" y2="12"/>
+              <line x1="18" y1="12" x2="22" y2="12"/>
             </svg>
           </button>
         </form>
@@ -94,6 +103,7 @@
         <div class="alert-row">
           <div id="weather-alert" class="weather-alert" hidden></div>
           <div id="rain-timing" class="weather-alert rain-timing" hidden></div>
+          <div id="aqi-badge" class="weather-alert" hidden></div>
         </div>
       </div>
 
@@ -148,6 +158,13 @@
         </div>
         <div class="map-wrap">
           <div id="map" class="map"></div>
+          <button id="map-aqi-btn" class="map-aqi-btn" type="button" aria-label="Luftqualität anzeigen" data-state="1">
+            <svg width="15" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"/>
+              <path d="M9.6 4.6A2 2 0 1 1 11 8H2"/>
+              <path d="M12.6 19.4A2 2 0 1 0 14 16H2"/>
+            </svg>
+          </button>
           <button id="map-cloud-btn" class="map-cloud-btn" type="button" aria-label="Wolken dimmen" data-state="0">
             <svg width="15" height="11" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M17 13H5a4 4 0 0 1-.5-7.95A5.5 5.5 0 1 1 17 13z"/>
@@ -275,6 +292,18 @@
     <!-- Day Detail Panel -->
     <section id="day-detail" class="card day-detail-card" hidden aria-live="polite" aria-label="Tagesdetails">
     </section>
+
+    <!-- Air Quality Card (shown when AQI map button is toggled on) -->
+    <section id="aqi-card" class="card aqi-card" aria-label="Luftqualität">
+      <div class="card-header">
+        <div>
+          <h3>Luftqualität</h3>
+          <span class="card-sub">Europ&auml;ischer Luftqualit&auml;tsindex &middot; n&auml;chste 24 Stunden</span>
+        </div>
+      </div>
+      <div id="aqi-current" class="aqi-current"></div>
+      <div id="aqi-chart" class="aqi-chart"></div>
+    </section>
   </main>
 
   <footer class="site-footer">
@@ -287,7 +316,7 @@
       &middot; Gebaut mit Vanilla JS
     </p>
     <p class="footer-privacy">
-      Datenschutz: Deine IP-Adresse wird beim Abrufen von Wetterdaten an Open-Meteo (Server: Deutschland) und Bright Sky/DWD (Server: Deutschland) sowie f&uuml;r die Kartenansicht an OpenStreetMap (UK &ndash; EU-Angemessenheitsbeschluss) &uuml;bertragen. Beim Laden des Regenradars wird deine IP-Adresse zus&auml;tzlich an RainViewer (Server: Lettland &ndash; EU-Angemessenheitsbeschluss) &uuml;bermittelt. Wenn der Cloud-/Niederschlagsoverlay aktiviert wird, erfolgt ein weiterer Transfer an OpenWeatherMap (UK &ndash; EU-Angemessenheitsbeschluss). Es werden keine personenbezogenen Daten gespeichert.
+      Datenschutz: Deine IP-Adresse wird beim Abrufen von Wetterdaten an Open-Meteo (Server: Deutschland) und Bright Sky/DWD (Server: Deutschland) sowie f&uuml;r die Kartenansicht an OpenStreetMap (UK &ndash; EU-Angemessenheitsbeschluss) &uuml;bertragen. Beim Laden des Regenradars wird deine IP-Adresse zus&auml;tzlich an RainViewer (Server: Lettland &ndash; EU-Angemessenheitsbeschluss) &uuml;bermittelt. Wenn der Cloud-/Niederschlagsoverlay aktiviert wird, erfolgt ein weiterer Transfer an OpenWeatherMap (UK &ndash; EU-Angemessenheitsbeschluss). Wenn du den GPS-Button verwendest, werden deine Koordinaten einmalig an Nominatim/OpenStreetMap (UK &ndash; EU-Angemessenheitsbeschluss) &uuml;bermittelt, um den Ortsnamen zu ermitteln. Luftqualit&auml;tsdaten werden &uuml;ber die Open-Meteo Air Quality API (Server: Deutschland) abgerufen. Es werden keine personenbezogenen Daten gespeichert.
     </p>
   </footer>
 

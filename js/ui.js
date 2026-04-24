@@ -14,24 +14,25 @@
   // These are rebuilt by setTimezone() whenever the active location changes.
   let hourFmt, weekdayFmt, dateShortFmt, dateLongFmt, updatedFmt, localDateFmt;
 
+  // Wraps Intl.DateTimeFormat construction; on RangeError (invalid timezone)
+  // falls back to Europe/Berlin so a corrupt tz string never crashes rendering.
+  function _safeDtf(locale, options) {
+    try {
+      return new Intl.DateTimeFormat(locale, options);
+    } catch (e) {
+      var safe = Object.assign({}, options, { timeZone: 'Europe/Berlin' });
+      return new Intl.DateTimeFormat(locale, safe);
+    }
+  }
+
   function _buildFormatters() {
-    hourFmt = new Intl.DateTimeFormat(LOCALE, {
-      hour: '2-digit', minute: '2-digit', timeZone: _tz, hour12: false
-    });
-    weekdayFmt = new Intl.DateTimeFormat(LOCALE, {
-      weekday: 'short', timeZone: _tz
-    });
-    dateShortFmt = new Intl.DateTimeFormat(LOCALE, {
-      day: '2-digit', month: '2-digit', timeZone: _tz
-    });
-    dateLongFmt = new Intl.DateTimeFormat(LOCALE, {
-      weekday: 'long', day: '2-digit', month: 'long', timeZone: _tz
-    });
-    updatedFmt = new Intl.DateTimeFormat(LOCALE, {
-      hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: _tz, hour12: false
-    });
+    hourFmt      = _safeDtf(LOCALE, { hour: '2-digit', minute: '2-digit', timeZone: _tz, hour12: false });
+    weekdayFmt   = _safeDtf(LOCALE, { weekday: 'short', timeZone: _tz });
+    dateShortFmt = _safeDtf(LOCALE, { day: '2-digit', month: '2-digit', timeZone: _tz });
+    dateLongFmt  = _safeDtf(LOCALE, { weekday: 'long', day: '2-digit', month: 'long', timeZone: _tz });
+    updatedFmt   = _safeDtf(LOCALE, { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: _tz, hour12: false });
     // Produces YYYY-MM-DD in local time — used for "is today" date comparisons.
-    localDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: _tz });
+    localDateFmt = _safeDtf('en-CA', { timeZone: _tz });
   }
 
   _buildFormatters();
@@ -39,6 +40,14 @@
   function setTimezone(tz) {
     _tz = String(tz || 'Europe/Berlin').slice(0, 50);
     _buildFormatters();
+  }
+
+  // ---------- SVG helpers (shared by renderTempChart + renderAqiChart) ----------
+  var NS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag) { return document.createElementNS(NS, tag); }
+  function setAttrs(elem, attrs) {
+    Object.keys(attrs).forEach(function (k) { elem.setAttribute(k, attrs[k]); });
+    return elem;
   }
 
   // ---------- Utils ----------
@@ -65,6 +74,9 @@
 
   // Currently active hourly timestamp (ms) for radar frame scrubbing; null = live.
   let _activeHourTs = null;
+
+  // AQI color/label lookup lives on window.WeatherAPI (see weather.js) so the
+  // same table is used here and in map.js without drift.
 
   // ---------- Wind / UV helpers ----------
   const _WIND_ARROWS  = ['↓','↙','←','↖','↑','↗','→','↘'];
@@ -628,7 +640,6 @@
     var slice = getHourlySlice(data);
     if (slice.length < 2) { clearChildren(container); return; }
 
-    var NS = 'http://www.w3.org/2000/svg';
     var W = 760, H = 200;
     var padL = 52, padR = 16, padT = 32, padB = 50;
     var plotW = W - padL - padR;
@@ -669,12 +680,6 @@
     var bottomY  = padT + plotH;
     var areaPath = linePath + ' L ' + lastPt.x.toFixed(1) + ',' + bottomY
                             + ' L ' + pts[0].x.toFixed(1) + ',' + bottomY + ' Z';
-
-    function svgEl(tag) { return document.createElementNS(NS, tag); }
-    function setAttrs(elem, attrs) {
-      Object.keys(attrs).forEach(function (k) { elem.setAttribute(k, attrs[k]); });
-      return elem;
-    }
 
     var svg = setAttrs(svgEl('svg'), {
       viewBox: '0 0 ' + W + ' ' + H,
@@ -1050,6 +1055,149 @@
     if (strip) strip.querySelectorAll('.radar-active').forEach(function (el) { el.classList.remove('radar-active'); });
   }
 
+  // ---------- AQI card ----------
+  function updateAqiBadge(aqiData) {
+    var badge = document.getElementById('aqi-badge');
+    if (!badge) return;
+    var eaqi = aqiData && aqiData.current ? aqiData.current.eaqi : null;
+    if (typeof eaqi !== 'number' || eaqi < 60) { badge.hidden = true; return; }
+    var info = window.WeatherAPI.aqiColorInfo(eaqi);
+    badge.className = 'weather-alert ' + (info ? info.cls : '');
+    badge.textContent = 'AQI ' + Math.round(eaqi) + ' · ' + (info ? info.label : '');
+    badge.hidden = false;
+  }
+
+  function setAqiCardVisible(on) {
+    var card = document.getElementById('aqi-card');
+    if (card) card.hidden = !on;
+  }
+
+  function isAqiCardVisible() {
+    var card = document.getElementById('aqi-card');
+    return !!(card && !card.hidden);
+  }
+
+  function renderAqiChart(aqiData) {
+    var currentEl = document.getElementById('aqi-current');
+    if (currentEl) {
+      clearChildren(currentEl);
+      if (aqiData) {
+        var c    = aqiData.current;
+        var info = window.WeatherAPI.aqiColorInfo(c.eaqi);
+        var main = document.createElement('div');
+        main.className = 'aqi-main';
+        var valEl = document.createElement('span');
+        valEl.className = 'aqi-value' + (info ? ' ' + info.cls : '');
+        valEl.textContent = c.eaqi !== null ? String(Math.round(c.eaqi)) : '--';
+        var lblEl = document.createElement('span');
+        lblEl.className   = 'aqi-label';
+        lblEl.textContent = info ? info.label : 'Keine Daten';
+        main.appendChild(valEl);
+        main.appendChild(lblEl);
+        currentEl.appendChild(main);
+
+        var subStats = document.createElement('div');
+        subStats.className = 'aqi-sub-stats';
+        [
+          { l: 'PM2.5', v: c.pm25  !== null ? fmtNum(c.pm25,  1) + ' µg/m³' : '--' },
+          { l: 'PM10',  v: c.pm10  !== null ? fmtNum(c.pm10,  1) + ' µg/m³' : '--' },
+          { l: 'Ozon',  v: c.ozone !== null ? fmtNum(c.ozone, 1) + ' µg/m³' : '--' }
+        ].forEach(function (s) {
+          var item = document.createElement('div');
+          item.className = 'aqi-sub-item';
+          var lEl = document.createElement('span');
+          lEl.className = 'aqi-sub-label'; lEl.textContent = s.l;
+          var vEl = document.createElement('span');
+          vEl.className = 'aqi-sub-value'; vEl.textContent = s.v;
+          item.appendChild(lEl); item.appendChild(vEl);
+          subStats.appendChild(item);
+        });
+        currentEl.appendChild(subStats);
+      }
+    }
+
+    var container = document.getElementById('aqi-chart');
+    if (!container) return;
+    if (!aqiData || !aqiData.hourly || !aqiData.hourly.length) { clearChildren(container); return; }
+
+    var now = Date.now();
+    var slice = aqiData.hourly.filter(function (h) {
+      return h.time.getTime() >= now - 30 * 60 * 1000;
+    }).slice(0, 25);
+    if (slice.length < 2) { clearChildren(container); return; }
+
+    var W = 760, H = 160;
+    var padL = 36, padR = 16, padT = 24, padB = 50;
+    var plotW = W - padL - padR;
+    var plotH = H - padT - padB;
+    var n     = slice.length;
+    var slotW = plotW / n;
+    var barW  = slotW * 0.72;
+    var yMax  = Math.max(100, Math.max.apply(null, slice.map(function (h) { return h.eaqi || 0; })) * 1.1);
+
+    function yOf(v)   { return padT + (1 - (v || 0) / yMax) * plotH; }
+    function barCX(i) { return padL + i * slotW + slotW / 2; }
+
+    var svg = setAttrs(svgEl('svg'), {
+      viewBox: '0 0 ' + W + ' ' + H,
+      'class': 'aqi-chart-svg',
+      'aria-hidden': 'true'
+    });
+
+    [20, 40, 60, 80, 100].forEach(function (v) {
+      if (v > yMax * 1.05) return;
+      var gy = yOf(v);
+      svg.appendChild(setAttrs(svgEl('line'), {
+        x1: padL, x2: W - padR, y1: gy.toFixed(1), y2: gy.toFixed(1),
+        stroke: '#252a40', 'stroke-width': '1', 'stroke-dasharray': '3 4'
+      }));
+      var lbl = setAttrs(svgEl('text'), {
+        x: padL - 4, y: (gy + 4).toFixed(1), 'text-anchor': 'end',
+        fill: '#5b6178', 'font-size': '10'
+      });
+      lbl.textContent = String(v);
+      svg.appendChild(lbl);
+    });
+
+    slice.forEach(function (h, i) {
+      if (h.eaqi === null) return;
+      var info  = window.WeatherAPI.aqiColorInfo(h.eaqi);
+      var color = info ? info.color : '#38bdf8';
+      var barH  = Math.max(2, (h.eaqi / yMax) * plotH);
+      var bx    = padL + i * slotW + (slotW - barW) / 2;
+      var by    = padT + plotH - barH;
+      svg.appendChild(setAttrs(svgEl('rect'), {
+        x: bx.toFixed(1), y: by.toFixed(1),
+        width: barW.toFixed(1), height: barH.toFixed(1),
+        fill: color, opacity: '0.75', rx: '2'
+      }));
+      var vLbl = setAttrs(svgEl('text'), {
+        x: barCX(i).toFixed(1), y: Math.max(padT + 11, by - 3).toFixed(1),
+        'text-anchor': 'middle', fill: color, 'font-size': '9', 'font-weight': '600'
+      });
+      vLbl.textContent = String(Math.round(h.eaqi));
+      svg.appendChild(vLbl);
+    });
+
+    var labelY = padT + plotH + 14;
+    slice.forEach(function (h, i) {
+      var lx   = barCX(i);
+      var fill = i === 0 ? '#38bdf8' : '#8892b0';
+      var tLbl = setAttrs(svgEl('text'), {
+        x: lx.toFixed(1), y: String(labelY),
+        'text-anchor': 'end',
+        fill: fill,
+        'font-size': '10', 'font-weight': i === 0 ? '600' : '400',
+        transform: 'rotate(-40, ' + lx.toFixed(1) + ', ' + labelY + ')'
+      });
+      tLbl.textContent = i === 0 ? 'Jetzt' : hourFmt.format(h.time);
+      svg.appendChild(tLbl);
+    });
+
+    clearChildren(container);
+    container.appendChild(svg);
+  }
+
   // ---------- Header / status ----------
   function renderUpdatedAt(date) {
     const el = document.getElementById('last-updated');
@@ -1094,6 +1242,10 @@
     renderUpdatedAt:    renderUpdatedAt,
     showError:          showError,
     hideError:          hideError,
-    setRefreshing:      setRefreshing
+    setRefreshing:      setRefreshing,
+    updateAqiBadge:     updateAqiBadge,
+    setAqiCardVisible:  setAqiCardVisible,
+    isAqiCardVisible:   isAqiCardVisible,
+    renderAqiChart:     renderAqiChart
   };
 })();

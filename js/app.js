@@ -138,9 +138,10 @@
     WeatherUI.clearActiveHour();
     WeatherMap.resetRadarFrame();
     try {
-      const [weatherResult, alertsResult] = await Promise.allSettled([
+      const [weatherResult, alertsResult, aqiResult] = await Promise.allSettled([
         WeatherAPI.fetchWeather(),
-        WeatherAPI.fetchAlerts()
+        WeatherAPI.fetchAlerts(),
+        WeatherAPI.fetchAqi()
       ]);
 
       if (weatherResult.status === 'rejected') {
@@ -157,6 +158,11 @@
       WeatherUI.renderUpdatedAt(data.fetchedAt);
       WeatherMap.updateMarkerPopup(data.current, data.location && data.location.name);
       _syncFavMarkers(); // fire-and-forget: refreshes fav marker icons + tooltips
+
+      const aqiData = aqiResult.status === 'fulfilled' ? aqiResult.value : null;
+      WeatherMap.setAqiData(aqiData);
+      WeatherUI.updateAqiBadge(aqiData);
+      if (aqiData) WeatherUI.renderAqiChart(aqiData);
 
       if (alertsResult.status === 'fulfilled') {
         WeatherUI.renderAlerts(alertsResult.value);
@@ -191,6 +197,37 @@
   let _suggestionsVisible = false;
   let _debounceTimer      = null;
 
+  async function useMyLocation() {
+    var btn = document.getElementById('gps-btn');
+    if (btn) { btn.disabled = true; btn.classList.add('loading'); }
+    try {
+      const pos = await new Promise(function (resolve, reject) {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          timeout: 10000,
+          maximumAge: 60000
+        });
+      });
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const info = await WeatherAPI.reverseGeocode(lat, lon);
+      pickLocation({
+        name:        info.name,
+        country:     info.country,
+        lat:         lat,
+        lon:         lon,
+        timezone:    info.timezone,
+        displayName: info.name + (info.country ? ', ' + info.country : '')
+      });
+    } catch (err) {
+      var msg = 'Standort konnte nicht ermittelt werden.';
+      if (err && err.code === 1) msg = 'GPS-Zugriff verweigert. Bitte in den Browser-Einstellungen erlauben.';
+      else if (err && err.code === 3) msg = 'GPS-Timeout. Bitte erneut versuchen.';
+      showSearchStatus(msg);
+    } finally {
+      if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
+    }
+  }
+
   function pickLocation(loc) {
     hideSuggestions();
     const input = document.getElementById('search-input');
@@ -198,6 +235,7 @@
     WeatherAPI.setLocation(loc);
     _saveLastLocation(loc);
     WeatherUI.setTimezone(loc.timezone);
+    WeatherMap.setTimezone(loc.timezone);
     WeatherMap.moveMarker(loc.lat, loc.lon, loc.name);
     updateLabels(loc);
     updateSubtitleStar();
@@ -392,12 +430,14 @@
       WeatherAPI.setLocation(urlLoc);
       _saveLastLocation(urlLoc);
       WeatherUI.setTimezone(urlLoc.timezone);
+      WeatherMap.setTimezone(urlLoc.timezone);
       updateLabels(urlLoc);
     } else {
       const saved = _loadLastLocation();
       if (saved) {
         WeatherAPI.setLocation(saved);
         WeatherUI.setTimezone(saved.timezone);
+        WeatherMap.setTimezone(saved.timezone);
         updateLabels(saved);
       }
     }
@@ -438,10 +478,27 @@
     }
     updateSubtitleStar();
 
+    var gpsBtn = document.getElementById('gps-btn');
+    if (gpsBtn) {
+      if (!navigator.geolocation) {
+        gpsBtn.style.display = 'none';
+      } else {
+        gpsBtn.addEventListener('click', useMyLocation);
+      }
+    }
+
     initSearch();
     WeatherUI.initHourlyToggle();
     WeatherUI.initHourlyMapClick();
     WeatherMap.initAnimation();
+    WeatherMap.initAqiLayer();
+
+    // AQI card mirrors the map AQI toggle — start hidden, flip on 'wd:aqi-toggle'.
+    WeatherUI.setAqiCardVisible(false);
+    document.addEventListener('wd:aqi-toggle', function (e) {
+      WeatherUI.setAqiCardVisible(e.detail.on);
+    });
+
     loadAndRender();
 
     // Start periodic refresh

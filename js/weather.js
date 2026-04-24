@@ -286,6 +286,101 @@
     };
   }
 
+  // Strip bidi overrides + control chars from remote strings before rendering/
+  // writing them to document.title (prevents tab-title spoofing via U+202E etc.).
+  function sanitizeDisplay(s) {
+    // C0/DEL/C1 controls + zero-width + bidi marks/overrides + isolates.
+    return String(s).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim();
+  }
+
+  // Conservative IANA timezone shape — rejects anything that wouldn't be a valid
+  // tz identifier before it reaches Intl.DateTimeFormat (RangeError guard).
+  var TZ_RE = /^[A-Za-z_]+(?:\/[A-Za-z_+\-0-9]+){0,2}$/;
+
+  function buildAqiUrl(loc) {
+    const lat = Number(loc.lat), lon = Number(loc.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
+        lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      throw new Error('Invalid coordinates');
+    }
+    const tz = encodeURIComponent(String(loc.timezone || 'Europe/Berlin').slice(0, 50));
+    return 'https://air-quality-api.open-meteo.com/v1/air-quality' +
+      '?latitude=' + lat.toFixed(5) +
+      '&longitude=' + lon.toFixed(5) +
+      '&current=european_aqi,pm2_5,pm10,ozone' +
+      '&hourly=european_aqi' +
+      '&timezone=' + tz +
+      '&forecast_days=2';
+  }
+
+  function aqiColorInfo(eaqi) {
+    if (typeof eaqi !== 'number' || isNaN(eaqi)) return null;
+    if (eaqi <= 20)  return { cls: 'aqi-very-good', label: 'Sehr gut',        color: '#22c55e' };
+    if (eaqi <= 40)  return { cls: 'aqi-good',      label: 'Gut',             color: '#84cc16' };
+    if (eaqi <= 60)  return { cls: 'aqi-moderate',  label: 'Mäßig',           color: '#eab308' };
+    if (eaqi <= 80)  return { cls: 'aqi-poor',      label: 'Schlecht',        color: '#f97316' };
+    if (eaqi <= 100) return { cls: 'aqi-very-poor', label: 'Sehr schlecht',   color: '#ef4444' };
+    return                  { cls: 'aqi-hazardous', label: 'Extrem schlecht', color: '#a855f7' };
+  }
+
+  async function fetchAqi() {
+    const loc  = activeLocation;
+    const resp = await fetchWithTimeout(buildAqiUrl(loc), 15000);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const c    = data.current || {};
+    const h    = data.hourly  || {};
+    const times   = h.time         || [];
+    const eaqiArr = h.european_aqi || [];
+    return {
+      current: {
+        eaqi:  typeof c.european_aqi === 'number' ? c.european_aqi : null,
+        pm25:  typeof c.pm2_5        === 'number' ? c.pm2_5        : null,
+        pm10:  typeof c.pm10         === 'number' ? c.pm10         : null,
+        ozone: typeof c.ozone        === 'number' ? c.ozone        : null
+      },
+      hourly: times.map(function (ts, i) {
+        return { time: new Date(ts * 1000), eaqi: eaqiArr[i] ?? null };
+      })
+    };
+  }
+
+  async function reverseGeocode(lat, lon) {
+    const la = Number(lat), lo = Number(lon);
+    if (!Number.isFinite(la) || !Number.isFinite(lo) ||
+        la < -90 || la > 90 || lo < -180 || lo > 180) {
+      throw new Error('Invalid coordinates');
+    }
+    const nominatimUrl = 'https://nominatim.openstreetmap.org/reverse?format=json' +
+      '&lat=' + la.toFixed(5) + '&lon=' + lo.toFixed(5) +
+      '&zoom=10&accept-language=de';
+    const openMeteoUrl = 'https://api.open-meteo.com/v1/forecast' +
+      '?latitude=' + la.toFixed(5) + '&longitude=' + lo.toFixed(5) +
+      '&current=temperature_2m&timezone=auto&timeformat=unixtime';
+
+    const [nominatimResult, timezoneResult] = await Promise.allSettled([
+      fetchWithTimeout(nominatimUrl, 5000).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); }),
+      fetchWithTimeout(openMeteoUrl, 5000).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    ]);
+
+    var name = 'Mein Standort';
+    var country = '';
+    if (nominatimResult.status === 'fulfilled') {
+      var addr = nominatimResult.value.address || {};
+      var raw = addr.city || addr.town || addr.village || addr.county || '';
+      if (raw) name = sanitizeDisplay(raw).slice(0, 100) || 'Mein Standort';
+      if (addr.country_code) country = sanitizeDisplay(addr.country_code).toUpperCase().slice(0, 10);
+    }
+
+    var timezone = 'UTC';
+    if (timezoneResult.status === 'fulfilled') {
+      var tz = timezoneResult.value.timezone;
+      if (tz && TZ_RE.test(tz) && tz.length <= 50) timezone = String(tz);
+    }
+
+    return { name: name, country: country, timezone: timezone };
+  }
+
   window.WeatherAPI = {
     DEFAULT_LOCATION:    DEFAULT_LOCATION,
     getLocation:         getLocation,
@@ -294,6 +389,9 @@
     fetchCurrentForLoc:  fetchCurrentForLoc,
     fetchAlerts:         fetchAlerts,
     describeWeather:     describeWeather,
-    geocode:             geocode
+    geocode:             geocode,
+    reverseGeocode:      reverseGeocode,
+    fetchAqi:            fetchAqi,
+    aqiColorInfo:        aqiColorInfo
   };
 })();

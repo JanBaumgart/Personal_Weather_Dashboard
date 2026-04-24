@@ -89,7 +89,7 @@ The app uses an **IIFE + `window.*` global namespace** pattern instead of ES mod
 
 - **WMO codes**: `weather.js` maps all Open-Meteo WMO codes (0–99) to `{ label, icon }`. Adding a new code means adding one entry to the `WEATHER_CODES` object in that file.
 - **Date parsing**: Open-Meteo returns unix timestamps (timeformat=unixtime). Bright Sky returns ISO strings — use `safeParseDate()` in `weather.js` for those, never `new Date(string)` directly.
-- **Locale**: All formatting uses `de-DE` locale and `Europe/Berlin` timezone via `Intl.DateTimeFormat`. Note: timezone is hardcoded to `Europe/Berlin` in `ui.js` — times for non-German locations still display in Berlin time (known limitation).
+- **Locale / Dynamische Zeitzone**: Formatting nutzt `de-DE` locale. Timezone ist dynamisch pro Standort. `WeatherUI.setTimezone(tz)` rebuildet alle `Intl.DateTimeFormat`-Instanzen in `ui.js`; `WeatherMap.setTimezone(tz)` rebuildet `_timeOverlayFmt` in `map.js` (Radar-Zeit-Overlay). `app.js` ruft beide bei jedem Standortwechsel auf: `pickLocation()`, Deep-Link-Init, Last-Location-Init. Timezone kommt aus Geocoding-Ergebnis (Open-Meteo) oder Nominatim-Flow (Open-Meteo `timezone=auto`).
 - **Skeleton loading**: HTML includes `.skeleton-text` / `.skeleton-box` placeholder elements; `ui.js:removeSkeleton()` strips the class once real data arrives.
 - **Sun arc SVG**: The arc is a fixed `viewBox="0 0 300 160"` semicircle path. The `#sun-dot` circle `cx/cy` is computed in `renderSun()` using trigonometry against the path's geometric centre `(150, 140)` with radius 130.
 - **Hourly view toggle**: The hourly card has a segmented control (Kacheln / Chart) that switches between the tile strip (`#hourly-strip`) and an SVG temperature chart (`#hourly-chart`). Toggle is initialised once via `WeatherUI.initHourlyToggle()` in `app.js:init()`. Both views are re-rendered on every data fetch via `renderHourly(data)` and `renderTempChart(data)`. The chart uses a Catmull-Rom → cubic Bézier smooth curve, gradient fill, horizontal grid lines, temperature dot-labels every 3 h, and precipitation probability bars at the bottom.
@@ -110,7 +110,21 @@ The app uses an **IIFE + `window.*` global namespace** pattern instead of ES mod
 - **Wind / UV im Hero**: `ui.js` berechnet aus `c.windDirection` (°) einen 8-Punkt-Richtungspfeil (↑↗→↘↓↙←↖, zeigt Windrichtung wohin) + Kompass-Kürzel (N/NO/O/SO/S/SW/W/NW). `beaufort(kmh)` liefert Bft-Zahl (0–12). Anzeige in `#stat-wind` + `#stat-wind-meta` (z.B. `↗ 24 km/h` / `Bft 5 · SW`). UV-Risiko-Label (`uvRisk(idx)`) zeigt Niedrig/Mittel/Hoch/Sehr hoch/Extrem in `#stat-uv-meta`. Beide Meta-Spans sind neue HTML-Elemente mit CSS-Klasse `.stat-meta`.
 - **URL Deep-Link**: `app.js:init()` liest `URLSearchParams` (`?lat=&lon=&name=&country=&timezone=`). Wenn lat/lon gültig (bounds-check) und name nicht leer → `WeatherAPI.setLocation()` vor Map-Init, sodass Karte direkt zentriert öffnet. Beispiel: `?lat=48.137&lon=11.576&name=München&country=DE&timezone=Europe/Berlin`. Kein Backend nötig, kein API-Layer-Eingriff.
 - **Favoriten-Marker auf der Karte**: `map.js:setFavMarkers(favorites, weatherMap)` rendert Amber-Marker (28×28 px, Gradient #fbbf24→#f97316, `.fav-marker`) für alle Favoriten. Aktiver Standort wird übersprungen (< 0.01° Abstand). Klick dispatcht Custom-Event `wd:pick-location` → `app.js:pickLocation()`. `app.js:_syncFavMarkers()` ist async und fetcht parallel für jeden Favoriten per `WeatherAPI.fetchCurrentForLoc(fav)` (nur `temperature_2m,weather_code`, kein Side-Effect auf `activeLocation`). Das Marker-Icon zeigt das Wetter-Emoji; der Tooltip zeigt Name + `⛅ 18° · Teils bewölkt`. Sync wird aufgerufen bei: `init()`, jedem `loadAndRender()` (fire-and-forget), `pickLocation()`, Stern-Toggle. `weather.js:fetchCurrentForLoc(loc)` ist der neue lightweight Fetch für beliebige Koordinaten ohne State-Mutation.
+- **Browser-Geolokalisierung**: `#gps-btn` (Crosshair-Icon, `.search-btn.gps-btn`) in `#search-form` direkt nach `#search-btn`. `app.js:useMyLocation()` (async): `navigator.geolocation.getCurrentPosition()` → lat/lon → `WeatherAPI.reverseGeocode(lat, lon)` → `pickLocation()`. Guard: wenn `navigator.geolocation` nicht verfügbar, wird Button ausgeblendet. Fehlerbehandlung: `PositionError.code 1` = Zugriff verweigert, `3` = Timeout — Meldung via `showSearchStatus()`. `weather.js:reverseGeocode(lat, lon)` ruft parallel Nominatim (`nominatim.openstreetmap.org/reverse`, 5s Timeout) + Open-Meteo (`timezone=auto`, 5s Timeout) via `Promise.allSettled` auf; Fallback: `name='Mein Standort'`, `country=''`, `timezone='UTC'`. Button: `disabled` + `.loading`-Klasse während des Fetches (CSS spin-Animation via `.search-btn.loading svg`).
 
+
+## Feature-Roadmap (Stand 22. Apr 2026)
+
+Aus Idea Pitch.html im Projektroot. Priorität: #1 → #2 → #3.
+
+### #1 Dynamische Zeitzone je Standort — FERTIG ✓
+`WeatherMap.setTimezone(tz)` in `map.js` rebuildet `_timeOverlayFmt`. Wird in `app.js` parallel zu `WeatherUI.setTimezone(tz)` an allen 3 Stellen aufgerufen.
+
+### #2 Browser-Geolokalisierung — FERTIG ✓
+GPS-Button (`#gps-btn`) in Suchleiste. `app.js:useMyLocation()` → Nominatim + Open-Meteo timezone=auto → `pickLocation()`. `vercel.json` Permissions-Policy auf `geolocation=(self)`. CSP + Privacy-Notice aktualisiert.
+
+### #3 Luftqualität (AQI) — FERTIG ✓
+`air-quality-api.open-meteo.com/v1/air-quality` (kein Key). `weather.js:fetchAqi()` parallel in `app.js` via `Promise.allSettled`. Map-Toggle-Button (`#map-aqi-btn`, bottom: 140px links) aktiviert `L.circleMarker` am aktuellen Standort + `.map-aqi-overlay` (bottom-right) + `#aqi-card` (nach `#day-detail`) mit `#aqi-current` (EAQI-Wert + PM2.5/PM10/Ozon) und `#aqi-chart` (SVG-Balkendiagramm nächste 24h, farbcodiert nach EAQI-Stufe). Hero-Badge (`#aqi-badge`) nur bei EAQI ≥ 60. CSP + Privacy-Notice angepasst.
 
 ## Security & Datenschutz
 
@@ -121,4 +135,5 @@ The app uses an **IIFE + `window.*` global namespace** pattern instead of ES mod
 - Geocoding-Eingabe: query trimmed + max 100 Zeichen, Ergebnisfelder je auf 60–100 Zeichen begrenzt, kein innerHTML — ausschließlich `textContent`
 - RainViewer `data.host` wird via Regex gegen `tilecache.rainviewer.com` validiert bevor URLs gebaut werden
 - OWM API Key: lokal in `js/config.js` (gitignored), auf Vercel als Env Var `OWM_API_KEY` über `api/owm-key.js` bereitgestellt. Key nie im Git-Repo. Der Key ist in OWM-Tile-Request-URLs im Browser-Netzwerk sichtbar — das ist bei direkten Tile-Requests unvermeidbar. OWM HTTP-Referrer-Restriction ist auf Free-Plan nicht verfügbar.
-- CSP in `index.html`: `img-src` enthält `tilecache.rainviewer.com`, `connect-src` enthält `api.rainviewer.com` — bereits korrekt gesetzt
+- CSP in `index.html`: `img-src` enthält `tilecache.rainviewer.com`, `connect-src` enthält `api.rainviewer.com` und `nominatim.openstreetmap.org` (für GPS Reverse-Geocoding) — korrekt gesetzt
+- `vercel.json` Permissions-Policy: `geolocation=(self)` — erlaubt GPS nur von eigener Origin; fremde iframes haben keinen Zugriff

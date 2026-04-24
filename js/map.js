@@ -25,7 +25,92 @@
   var _animBtn             = null;
   var _animTimerId         = null;
   var _animIdx             = 0;
-  var _timeOverlayFmt = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Berlin' });
+  var _timeOverlayTz  = 'Europe/Berlin';
+
+  // Wraps Intl.DateTimeFormat; on RangeError (invalid tz) falls back to
+  // Europe/Berlin so a corrupt tz string never crashes the radar time overlay.
+  function _safeTimeOverlayFmt(tz) {
+    try {
+      return new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz });
+    } catch (e) {
+      return new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Berlin' });
+    }
+  }
+  var _timeOverlayFmt = _safeTimeOverlayFmt(_timeOverlayTz);
+
+  var _aqiOn      = false;
+  var _aqiOverlay = null;
+  var _aqiData    = null;
+
+  function setTimezone(tz) {
+    _timeOverlayTz  = String(tz || 'Europe/Berlin').slice(0, 50);
+    _timeOverlayFmt = _safeTimeOverlayFmt(_timeOverlayTz);
+  }
+
+  // ---------- AQI overlay ----------
+  // AQI color/label lookup is provided by window.WeatherAPI.aqiColorInfo
+  // (single source of truth, shared with ui.js).
+
+  function _getOrCreateAqiEl() {
+    if (!mapInstance) return null;
+    var wrap = mapInstance.getContainer().parentElement;
+    if (!wrap) return null;
+    var el = wrap.querySelector('.map-aqi-overlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'map-aqi-overlay';
+      wrap.appendChild(el);
+    }
+    return el;
+  }
+
+  function _updateAqiOverlay() {
+    if (!mapInstance || !markerInstance) return;
+    if (!_aqiOn) {
+      if (_aqiOverlay) { mapInstance.removeLayer(_aqiOverlay); _aqiOverlay = null; }
+      var offEl = _getOrCreateAqiEl();
+      if (offEl) offEl.classList.remove('map-aqi-overlay--visible');
+      return;
+    }
+    var eaqi = _aqiData && _aqiData.current ? _aqiData.current.eaqi : null;
+    var info = window.WeatherAPI.aqiColorInfo(eaqi);
+    if (!info) return;
+    var pos = markerInstance.getLatLng();
+    if (_aqiOverlay) {
+      _aqiOverlay.setLatLng(pos);
+      _aqiOverlay.setStyle({ color: info.color, fillColor: info.color });
+    } else {
+      _aqiOverlay = L.circleMarker(pos, {
+        radius: 55, color: info.color, fillColor: info.color,
+        fillOpacity: 0.12, opacity: 0.65, weight: 2
+      }).addTo(mapInstance);
+    }
+    var onEl = _getOrCreateAqiEl();
+    if (onEl) {
+      onEl.textContent = 'AQI ' + Math.round(eaqi) + ' · ' + info.label;
+      onEl.style.color = info.color;
+      onEl.classList.add('map-aqi-overlay--visible');
+    }
+  }
+
+  function setAqiData(aqiData) {
+    _aqiData = aqiData;
+    if (_aqiOn) _updateAqiOverlay();
+  }
+
+  function initAqiLayer() {
+    var btn = document.getElementById('map-aqi-btn');
+    if (!btn || !mapInstance) return;
+    btn.setAttribute('data-state', '1');
+    btn.setAttribute('aria-label', 'Luftqualität anzeigen');
+    btn.addEventListener('click', function () {
+      _aqiOn = !_aqiOn;
+      btn.setAttribute('data-state', _aqiOn ? '0' : '1');
+      btn.setAttribute('aria-label', _aqiOn ? 'Luftqualität ausblenden' : 'Luftqualität anzeigen');
+      _updateAqiOverlay();
+      document.dispatchEvent(new CustomEvent('wd:aqi-toggle', { detail: { on: _aqiOn } }));
+    });
+  }
 
   // ---------- Map init ----------
   function initMap(opts) {
@@ -131,6 +216,7 @@
       _buildPopupEl(name, '', lat.toFixed(2) + '° N, ' + lon.toFixed(2) + '° E')
     );
     mapInstance.flyTo(latlng, 10, { duration: 1.2 });
+    if (_aqiOverlay) _aqiOverlay.setLatLng(latlng);
   }
 
   function updateMarkerPopup(current, locationName) {
@@ -542,6 +628,9 @@
     updateMarkerPopup: updateMarkerPopup,
     setRadarFrame:     setRadarFrame,
     resetRadarFrame:   resetRadarFrame,
-    setFavMarkers:     setFavMarkers
+    setFavMarkers:     setFavMarkers,
+    setTimezone:       setTimezone,
+    initAqiLayer:      initAqiLayer,
+    setAqiData:        setAqiData
   };
 })();
