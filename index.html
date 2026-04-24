@@ -4,22 +4,34 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="color-scheme" content="dark" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://tilecache.rainviewer.com https://tile.openweathermap.org; connect-src 'self' https://api.open-meteo.com https://geocoding-api.open-meteo.com https://air-quality-api.open-meteo.com https://api.brightsky.dev https://api.rainviewer.com https://nominatim.openstreetmap.org; font-src 'self'; object-src 'none'; base-uri 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src-elem 'self' https://fonts.googleapis.com; style-src-attr 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://tilecache.rainviewer.com https://tile.openweathermap.org; connect-src 'self' https://api.open-meteo.com https://geocoding-api.open-meteo.com https://air-quality-api.open-meteo.com https://api.brightsky.dev https://api.rainviewer.com https://nominatim.openstreetmap.org; font-src 'self' https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>Weather Dashboard — Nuremberg</title>
 
-  <!-- Leaflet CSS (lokal vendored — kein CDN-Transfer). SRI schützt vor manipulierter Datei (z.B. kompromittiertes Git). -->
-  <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css"
-        integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
-        crossorigin="anonymous" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+  <!-- Leaflet CSS (lokal vendored — kein CDN-Transfer). -->
+  <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css" />
 
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
+  <div class="aurora-bg" aria-hidden="true">
+    <div class="aurora-orb aurora-orb-1"></div>
+    <div class="aurora-orb aurora-orb-2"></div>
+    <div class="aurora-orb aurora-orb-3"></div>
+  </div>
+
   <header class="site-header">
     <div class="header-inner">
       <div class="brand">
-        <span class="brand-mark">&#9729;</span>
+        <span class="brand-mark">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
+          </svg>
+        </span>
         <div class="brand-text">
           <h1>Weather Dashboard</h1>
           <div class="subtitle-row">
@@ -78,7 +90,13 @@
     <!-- Error Banner -->
     <div id="error-banner" class="error-banner" hidden>
       <div class="error-inner">
-        <span class="error-icon">&#9888;</span>
+        <span class="error-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </span>
         <div>
           <strong>Datenabruf fehlgeschlagen.</strong>
           <span id="error-message">Bitte versuche es erneut.</span>
@@ -86,114 +104,62 @@
       </div>
     </div>
 
-    <!-- Hero / Current Weather -->
-    <section class="hero card" id="hero-card" aria-labelledby="hero-title">
-      <div class="hero-left">
-        <div class="location">
-          <span class="pin">&#128205;</span>
-          <h2 id="hero-title">Nürnberg, DE</h2>
-        </div>
-        <div class="hero-main">
-          <div id="hero-icon" class="hero-icon skeleton-box">&nbsp;</div>
-          <div class="hero-temp-wrap">
-            <div id="hero-temp" class="hero-temp skeleton-text">--&deg;</div>
-            <div id="hero-desc" class="hero-desc skeleton-text">Lade&hellip;</div>
+    <!-- Top Row: Hero + Sun -->
+    <div class="row-hero-sun">
+      <section class="hero card" id="hero-card" aria-labelledby="hero-title">
+        <div class="hero-left">
+          <div class="location">
+            <span class="pin">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+                <circle cx="12" cy="10" r="3"/>
+              </svg>
+            </span>
+            <h2 id="hero-title">Nürnberg, DE</h2>
+          </div>
+          <div class="hero-main">
+            <div id="hero-icon" class="hero-icon skeleton-box">&nbsp;</div>
+            <div class="hero-temp-wrap">
+              <div id="hero-temp" class="hero-temp skeleton-text">--&deg;</div>
+              <div id="hero-desc" class="hero-desc skeleton-text">Lade&hellip;</div>
+            </div>
+          </div>
+          <div class="alert-row">
+            <div id="weather-alert" class="weather-alert" hidden></div>
+            <div id="rain-timing" class="weather-alert rain-timing" hidden></div>
+            <div id="aqi-badge" class="weather-alert" hidden></div>
           </div>
         </div>
-        <div class="alert-row">
-          <div id="weather-alert" class="weather-alert" hidden></div>
-          <div id="rain-timing" class="weather-alert rain-timing" hidden></div>
-          <div id="aqi-badge" class="weather-alert" hidden></div>
-        </div>
-      </div>
 
-      <div class="hero-right">
-        <div class="stat">
-          <span class="stat-label">Gefühlt</span>
-          <span id="stat-feels" class="stat-value skeleton-text">--&deg;</span>
+        <div class="hero-right">
+          <div class="stat">
+            <span class="stat-label">Gefühlt</span>
+            <span id="stat-feels" class="stat-value skeleton-text">--&deg;</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Höchst / Tiefst</span>
+            <span id="stat-highlow" class="stat-value skeleton-text">-- / --</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Wind</span>
+            <span id="stat-wind" class="stat-value skeleton-text">-- km/h</span>
+            <span id="stat-wind-meta" class="stat-meta"></span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Luftfeuchtigkeit</span>
+            <span id="stat-humidity" class="stat-value skeleton-text">-- %</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">UV-Index</span>
+            <span id="stat-uv" class="stat-value skeleton-text">--</span>
+            <span id="stat-uv-meta" class="stat-meta"></span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Niederschlag</span>
+            <span id="stat-precip" class="stat-value skeleton-text">-- mm</span>
+          </div>
         </div>
-        <div class="stat">
-          <span class="stat-label">Höchst / Tiefst</span>
-          <span id="stat-highlow" class="stat-value skeleton-text">-- / --</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Wind</span>
-          <span id="stat-wind" class="stat-value skeleton-text">-- km/h</span>
-          <span id="stat-wind-meta" class="stat-meta"></span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Luftfeuchtigkeit</span>
-          <span id="stat-humidity" class="stat-value skeleton-text">-- %</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">UV-Index</span>
-          <span id="stat-uv" class="stat-value skeleton-text">--</span>
-          <span id="stat-uv-meta" class="stat-meta"></span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">Niederschlag</span>
-          <span id="stat-precip" class="stat-value skeleton-text">-- mm</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- DWD Alerts Section -->
-    <section id="alerts-section" class="card alerts-card" hidden aria-live="polite" aria-label="Unwetterwarnungen">
-      <div class="card-header">
-        <div>
-          <h3>⚠️ Unwetterwarnungen</h3>
-          <span class="card-sub">Offizielle DWD-Warnungen für Nürnberg</span>
-        </div>
-        <span id="alerts-count" class="alerts-count-badge"></span>
-      </div>
-      <div id="alerts-list" class="alerts-list"></div>
-    </section>
-
-    <!-- Middle Row: Map + Sun -->
-    <section class="row-two-col">
-      <div class="card map-card" aria-labelledby="map-title">
-        <div class="card-header">
-          <h3 id="map-title">Standort</h3>
-          <span class="card-sub">Nürnberg auf der Karte</span>
-        </div>
-        <div class="map-wrap">
-          <div id="map" class="map"></div>
-          <button id="map-aqi-btn" class="map-aqi-btn" type="button" aria-label="Luftqualität anzeigen" data-state="1">
-            <svg width="15" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"/>
-              <path d="M9.6 4.6A2 2 0 1 1 11 8H2"/>
-              <path d="M12.6 19.4A2 2 0 1 0 14 16H2"/>
-            </svg>
-          </button>
-          <button id="map-cloud-btn" class="map-cloud-btn" type="button" aria-label="Wolken dimmen" data-state="0">
-            <svg width="15" height="11" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M17 13H5a4 4 0 0 1-.5-7.95A5.5 5.5 0 1 1 17 13z"/>
-            </svg>
-          </button>
-          <button id="map-radar-btn" class="map-radar-btn" type="button" aria-label="Niederschlag dimmen" data-state="0">
-            <svg width="15" height="13" viewBox="0 0 20 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M17 11H5a4 4 0 0 1-.5-7.95A5.5 5.5 0 1 1 17 11z"/>
-              <line x1="7" y1="15" x2="6" y2="17"/>
-              <line x1="11" y1="15" x2="10" y2="17"/>
-              <line x1="15" y1="15" x2="14" y2="17"/>
-            </svg>
-          </button>
-          <button id="map-expand-btn" class="map-expand-btn" type="button" aria-label="Karte maximieren" aria-expanded="false">
-            <svg class="icon-expand" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polyline points="5,1 1,1 1,5"/>
-              <polyline points="9,1 13,1 13,5"/>
-              <polyline points="13,9 13,13 9,13"/>
-              <polyline points="5,13 1,13 1,9"/>
-            </svg>
-            <svg class="icon-collapse" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polyline points="1,5 5,5 5,1"/>
-              <polyline points="9,1 9,5 13,5"/>
-              <polyline points="13,9 9,9 9,13"/>
-              <polyline points="1,9 5,9 5,13"/>
-            </svg>
-          </button>
-        </div>
-      </div>
+      </section>
 
       <div class="card sun-card" aria-labelledby="sun-title">
         <div class="card-header">
@@ -210,28 +176,115 @@
             </defs>
             <path d="M 20 140 A 130 130 0 0 1 280 140" stroke="#2a2f44" stroke-width="3" fill="none" stroke-dasharray="4 6"/>
             <path id="sun-arc-path" d="M 20 140 A 130 130 0 0 1 280 140" stroke="url(#sunGrad)" stroke-width="4" fill="none" stroke-linecap="round"/>
-            <circle id="sun-dot" cx="20" cy="140" r="10" fill="#ffcc70" stroke="#1a1d2e" stroke-width="3"/>
+            <circle id="sun-dot" cx="20" cy="140" r="10" fill="#ffcc70" stroke="#0f1117" stroke-width="3"/>
             <text x="20" y="158" text-anchor="middle" fill="#8892b0" font-size="12">Ost</text>
             <text x="280" y="158" text-anchor="middle" fill="#8892b0" font-size="12">West</text>
           </svg>
         </div>
         <div class="sun-times">
           <div class="sun-time">
-            <span class="sun-emoji">&#127749;</span>
+            <span class="sun-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2v8"/><path d="m4.93 10.93 1.41 1.41"/>
+                <path d="M2 18h2"/><path d="M20 18h2"/>
+                <path d="m19.07 10.93-1.41 1.41"/>
+                <path d="M22 22H2"/>
+                <path d="m8 6 4-4 4 4"/>
+                <path d="M16 18a4 4 0 0 0-8 0"/>
+              </svg>
+            </span>
             <span class="sun-label">Aufgang</span>
             <strong id="sun-rise" class="skeleton-text">--:--</strong>
           </div>
           <div class="sun-time">
-            <span class="sun-emoji">&#127751;</span>
+            <span class="sun-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 10V2"/><path d="m4.93 10.93 1.41 1.41"/>
+                <path d="M2 18h2"/><path d="M20 18h2"/>
+                <path d="m19.07 10.93-1.41 1.41"/>
+                <path d="M22 22H2"/>
+                <path d="m16 6-4 4-4-4"/>
+                <path d="M16 18a4 4 0 0 0-8 0"/>
+              </svg>
+            </span>
             <span class="sun-label">Untergang</span>
             <strong id="sun-set" class="skeleton-text">--:--</strong>
           </div>
           <div class="sun-time">
-            <span class="sun-emoji">&#9201;</span>
+            <span class="sun-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+              </svg>
+            </span>
             <span class="sun-label">Tageslänge</span>
             <strong id="sun-duration" class="skeleton-text">-- h</strong>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- DWD Alerts Section -->
+    <section id="alerts-section" class="card alerts-card" hidden aria-live="polite" aria-label="Unwetterwarnungen">
+      <div class="card-header">
+        <div>
+          <h3 class="alerts-heading">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="alert-heading-icon">
+              <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            Unwetterwarnungen
+          </h3>
+          <span class="card-sub">Offizielle DWD-Warnungen für Nürnberg</span>
+        </div>
+        <span id="alerts-count" class="alerts-count-badge"></span>
+      </div>
+      <div id="alerts-list" class="alerts-list"></div>
+    </section>
+
+    <!-- Map (full width) -->
+    <section class="card map-card" aria-labelledby="map-title">
+      <div class="card-header">
+        <h3 id="map-title">Standort</h3>
+        <span class="card-sub">Nürnberg auf der Karte</span>
+      </div>
+      <div class="map-wrap">
+        <div id="map" class="map"></div>
+        <button id="map-aqi-btn" class="map-aqi-btn" type="button" aria-label="Luftqualität anzeigen" data-state="1">
+          <svg width="15" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"/>
+            <path d="M9.6 4.6A2 2 0 1 1 11 8H2"/>
+            <path d="M12.6 19.4A2 2 0 1 0 14 16H2"/>
+          </svg>
+        </button>
+        <button id="map-cloud-btn" class="map-cloud-btn" type="button" aria-label="Wolken dimmen" data-state="0">
+          <svg width="15" height="11" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M17 13H5a4 4 0 0 1-.5-7.95A5.5 5.5 0 1 1 17 13z"/>
+          </svg>
+        </button>
+        <button id="map-radar-btn" class="map-radar-btn" type="button" aria-label="Niederschlag dimmen" data-state="0">
+          <svg width="15" height="13" viewBox="0 0 20 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M17 11H5a4 4 0 0 1-.5-7.95A5.5 5.5 0 1 1 17 11z"/>
+            <line x1="7" y1="15" x2="6" y2="17"/>
+            <line x1="11" y1="15" x2="10" y2="17"/>
+            <line x1="15" y1="15" x2="14" y2="17"/>
+          </svg>
+        </button>
+        <button id="map-expand-btn" class="map-expand-btn" type="button" aria-label="Karte maximieren" aria-expanded="false">
+          <svg class="icon-expand" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="5,1 1,1 1,5"/>
+            <polyline points="9,1 13,1 13,5"/>
+            <polyline points="13,9 13,13 9,13"/>
+            <polyline points="5,13 1,13 1,9"/>
+          </svg>
+          <svg class="icon-collapse" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="1,5 5,5 5,1"/>
+            <polyline points="9,1 9,5 13,5"/>
+            <polyline points="13,9 9,9 9,13"/>
+            <polyline points="1,9 5,9 5,13"/>
+          </svg>
+        </button>
       </div>
     </section>
 
@@ -293,7 +346,7 @@
     <section id="day-detail" class="card day-detail-card" hidden aria-live="polite" aria-label="Tagesdetails">
     </section>
 
-    <!-- Air Quality Card (shown when AQI map button is toggled on) -->
+    <!-- Air Quality Card -->
     <section id="aqi-card" class="card aqi-card" aria-label="Luftqualität">
       <div class="card-header">
         <div>
@@ -328,10 +381,8 @@
     </p>
   </footer>
 
-  <!-- Leaflet JS (lokal vendored — kein CDN-Transfer). SRI schützt vor manipulierter Datei. -->
-  <script src="vendor/leaflet-1.9.4/leaflet.js"
-          integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
-          crossorigin="anonymous"></script>
+  <!-- Leaflet JS (lokal vendored — kein CDN-Transfer). -->
+  <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
 
   <!-- App scripts (order matters: helpers first, app last) -->
   <script src="js/config.js"></script>

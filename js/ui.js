@@ -568,7 +568,9 @@
     clearChildren(panel);
     panel.appendChild(frag);
     panel.hidden = false;
-    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    requestAnimationFrame(function () {
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
   }
 
   function hideDayDetail() {

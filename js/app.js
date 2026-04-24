@@ -16,6 +16,7 @@
   const FAV_KEY      = 'weather_favorites';
   const FAV_MAX      = 8;
   const LAST_LOC_KEY = 'weather_last_location';
+  var _favsCache = null;
 
   /**
    * Validate a favorite entry's shape before trusting it.
@@ -40,22 +41,27 @@
   }
 
   function loadFavorites() {
+    if (_favsCache !== null) return _favsCache.slice();
     try {
       var raw = JSON.parse(localStorage.getItem(FAV_KEY) || '[]');
-      if (!Array.isArray(raw)) return [];
-      return raw.filter(_isValidFavorite);
-    } catch (e) { return []; }
+      if (!Array.isArray(raw)) { _favsCache = []; return []; }
+      _favsCache = raw.filter(_isValidFavorite);
+      return _favsCache.slice();
+    } catch (e) { _favsCache = []; return []; }
   }
   function _saveFavorites(list) {
+    _favsCache = list.slice();
     try { localStorage.setItem(FAV_KEY, JSON.stringify(list)); } catch (e) { /* quota */ }
   }
 
   function _saveLastLocation(loc) {
     try {
       localStorage.setItem(LAST_LOC_KEY, JSON.stringify({
-        name: loc.name, country: loc.country, lat: loc.lat, lon: loc.lon,
+        name: WeatherAPI.sanitizeDisplay(loc.name),
+        country: WeatherAPI.sanitizeDisplay(loc.country),
+        lat: loc.lat, lon: loc.lon,
         timezone: loc.timezone || 'Europe/Berlin',
-        displayName: loc.displayName
+        displayName: loc.displayName ? WeatherAPI.sanitizeDisplay(loc.displayName) : loc.displayName
       }));
     } catch (e) { /* quota */ }
   }
@@ -74,7 +80,13 @@
     var list = loadFavorites();
     if (list.some(function (f) { return _sameLoc(f, loc); })) return;
     var displayName = loc.displayName || (loc.name + ', ' + loc.country);
-    list.push({ name: loc.name, country: loc.country, lat: loc.lat, lon: loc.lon, timezone: loc.timezone || 'Europe/Berlin', displayName: displayName });
+    list.push({
+      name: WeatherAPI.sanitizeDisplay(loc.name),
+      country: WeatherAPI.sanitizeDisplay(loc.country),
+      lat: loc.lat, lon: loc.lon,
+      timezone: loc.timezone || 'Europe/Berlin',
+      displayName: WeatherAPI.sanitizeDisplay(displayName)
+    });
     list.sort(function (a, b) { return a.name.localeCompare(b.name, 'de'); });
     if (list.length > FAV_MAX) list = list.slice(0, FAV_MAX);
     _saveFavorites(list);
@@ -99,7 +111,13 @@
       return false;
     }
     var displayName = loc.displayName || (loc.name + ', ' + loc.country);
-    list.push({ name: loc.name, country: loc.country, lat: loc.lat, lon: loc.lon, timezone: loc.timezone || 'Europe/Berlin', displayName: displayName });
+    list.push({
+      name: WeatherAPI.sanitizeDisplay(loc.name),
+      country: WeatherAPI.sanitizeDisplay(loc.country),
+      lat: loc.lat, lon: loc.lon,
+      timezone: loc.timezone || 'Europe/Berlin',
+      displayName: WeatherAPI.sanitizeDisplay(displayName)
+    });
     list.sort(function (a, b) { return a.name.localeCompare(b.name, 'de'); });
     if (list.length > FAV_MAX) list = list.slice(0, FAV_MAX);
     _saveFavorites(list);
@@ -132,6 +150,28 @@
    * Fetch weather data and render every section.
    * On failure, show the error banner but leave any previously-rendered data intact.
    */
+  // ---------- Dynamic weather theming ----------
+  var _WEATHER_THEME_CLASSES = ['w-clear','w-cloud','w-rain','w-storm','w-snow','w-fog',
+                                 'time-dawn','time-day','time-dusk','time-night'];
+  function setWeatherTheme(wmoCode, timezone) {
+    var body = document.body;
+    _WEATHER_THEME_CLASSES.forEach(function (c) { body.classList.remove(c); });
+    if (wmoCode === 0 || wmoCode === 1)                                      body.classList.add('w-clear');
+    else if (wmoCode <= 3)                                                   body.classList.add('w-cloud');
+    else if (wmoCode <= 67 || (wmoCode >= 80 && wmoCode <= 82))             body.classList.add('w-rain');
+    else if (wmoCode >= 95)                                                  body.classList.add('w-storm');
+    else if ((wmoCode >= 71 && wmoCode <= 77) || (wmoCode >= 85 && wmoCode <= 86)) body.classList.add('w-snow');
+    else if (wmoCode >= 40 && wmoCode <= 49)                                 body.classList.add('w-fog');
+    try {
+      var h = parseInt(new Date().toLocaleString('en-US', {
+        timeZone: timezone, hour: 'numeric', hour12: false
+      }), 10);
+      if      (h >= 5  && h < 7)              body.classList.add('time-dawn');
+      else if (h >= 18 && h < 20)             body.classList.add('time-dusk');
+      else if (h >= 20 || h < 5)             body.classList.add('time-night');
+    } catch (_e) { /* invalid timezone — no time class */ }
+  }
+
   async function loadAndRender() {
     lastLoadTime = Date.now();
     WeatherUI.setRefreshing(true);
@@ -151,6 +191,10 @@
       const data = weatherResult.value;
       WeatherUI.hideError();
       WeatherUI.renderHero(data);
+      setWeatherTheme(
+        data.current.weatherCode,
+        (WeatherAPI.getLocation && WeatherAPI.getLocation().timezone) || 'UTC'
+      );
       WeatherUI.renderSun(data);
       WeatherUI.renderHourly(data);
       WeatherUI.renderTempChart(data);
@@ -417,12 +461,13 @@
     const params = new URLSearchParams(window.location.search);
     const pLat  = parseFloat(params.get('lat'));
     const pLon  = parseFloat(params.get('lon'));
-    const pName = String(params.get('name') || '').trim().slice(0, 100);
+    const pNameRaw = String(params.get('name') || '').trim().slice(0, 100);
+    const pName = WeatherAPI.sanitizeDisplay(pNameRaw);
     if (isFinite(pLat) && pLat >= -90 && pLat <= 90 &&
         isFinite(pLon) && pLon >= -180 && pLon <= 180 && pName) {
       const urlLoc = {
         name:     pName,
-        country:  String(params.get('country')  || '').trim().slice(0, 10),
+        country:  WeatherAPI.sanitizeDisplay(String(params.get('country')  || '').trim().slice(0, 10)),
         lat:      pLat,
         lon:      pLon,
         timezone: String(params.get('timezone') || 'Europe/Berlin').slice(0, 50)

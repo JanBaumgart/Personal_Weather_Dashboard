@@ -163,10 +163,10 @@
       return {
         id:          a.id,
         severity:    VALID_SEVERITIES.has(sev) ? sev : 'minor',
-        event:       trimStr(a.event_de   || a.event_en,   100),
-        headline:    trimStr(a.headline_de || a.headline_en, 500),
-        description: trimStr(a.description_de || a.description_en, 2000),
-        instruction: trimStr(a.instruction_de || a.instruction_en, 2000),
+        event:       sanitizeDisplay(trimStr(a.event_de   || a.event_en,   100)),
+        headline:    sanitizeDisplay(trimStr(a.headline_de || a.headline_en, 500)),
+        description: sanitizeDisplay(trimStr(a.description_de || a.description_en, 2000)),
+        instruction: sanitizeDisplay(trimStr(a.instruction_de || a.instruction_en, 2000)),
         onset:       safeParseDate(a.onset),
         expires:     safeParseDate(a.expires)
       };
@@ -393,6 +393,7 @@
     geocode:             geocode,
     reverseGeocode:      reverseGeocode,
     fetchAqi:            fetchAqi,
-    aqiColorInfo:        aqiColorInfo
+    aqiColorInfo:        aqiColorInfo,
+    sanitizeDisplay:     sanitizeDisplay
   };
 })();
