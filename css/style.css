@@ -1097,6 +1097,41 @@ a:hover { text-decoration: underline; }
 .weather-alert.aqi-very-poor { background: rgba(239, 68, 68, 0.1);  border-color: rgba(239, 68, 68, 0.35);  color: #ef4444; }
 .weather-alert.aqi-hazardous { background: rgba(168, 85, 247, 0.1); border-color: rgba(168, 85, 247, 0.35); color: #a855f7; }
 
+/* AQI legend */
+.aqi-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.aqi-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.aqi-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.aqi-legend-dot.aqi-very-good { background: #22c55e; }
+.aqi-legend-dot.aqi-good      { background: #84cc16; }
+.aqi-legend-dot.aqi-moderate  { background: #eab308; }
+.aqi-legend-dot.aqi-poor      { background: #f97316; }
+.aqi-legend-dot.aqi-very-poor { background: #ef4444; }
+.aqi-legend-dot.aqi-hazardous { background: #a855f7; }
+.aqi-legend-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+.aqi-legend-range {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+}
+
 /* ---------- Footer ---------- */
 .site-footer {
   margin-top: 32px;

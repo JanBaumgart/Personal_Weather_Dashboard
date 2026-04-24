@@ -162,7 +162,7 @@
       const aqiData = aqiResult.status === 'fulfilled' ? aqiResult.value : null;
       WeatherMap.setAqiData(aqiData);
       WeatherUI.updateAqiBadge(aqiData);
-      if (aqiData) WeatherUI.renderAqiChart(aqiData);
+      WeatherUI.renderAqiChart(aqiData);
 
       if (alertsResult.status === 'fulfilled') {
         WeatherUI.renderAlerts(alertsResult.value);
@@ -492,13 +492,6 @@
     WeatherUI.initHourlyMapClick();
     WeatherMap.initAnimation();
     WeatherMap.initAqiLayer();
-
-    // AQI card mirrors the map AQI toggle — start hidden, flip on 'wd:aqi-toggle'.
-    WeatherUI.setAqiCardVisible(false);
-    document.addEventListener('wd:aqi-toggle', function (e) {
-      WeatherUI.setAqiCardVisible(e.detail.on);
-    });
-
     loadAndRender();
 
     // Start periodic refresh

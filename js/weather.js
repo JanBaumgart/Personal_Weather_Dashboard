@@ -310,6 +310,7 @@
       '&current=european_aqi,pm2_5,pm10,ozone' +
       '&hourly=european_aqi' +
       '&timezone=' + tz +
+      '&timeformat=unixtime' +
       '&forecast_days=2';
   }
 

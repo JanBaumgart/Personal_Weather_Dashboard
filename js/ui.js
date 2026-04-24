@@ -814,6 +814,7 @@
 
     if (!alerts || !alerts.length) {
       section.hidden = true;
+      if (alertEl) { alertEl.hidden = true; alertEl.className = 'weather-alert'; alertEl.textContent = ''; }
       return;
     }
 
@@ -876,15 +877,15 @@
         var onsetDate   = localDateFmt.format(a.onset);
         var expiresDate = localDateFmt.format(a.expires);
         if (onsetDate === expiresDate) {
-          timeEl.textContent = 'Gültig ' + hourFmt.format(a.onset)
-            + ' – ' + hourFmt.format(a.expires) + ' Uhr';
+          timeEl.textContent = 'Gültig ' + dateShortFmt.format(a.onset) + ' '
+            + hourFmt.format(a.onset) + ' – ' + hourFmt.format(a.expires) + ' Uhr';
         } else {
           timeEl.textContent = 'Von ' + dateShortFmt.format(a.onset) + ' '
             + hourFmt.format(a.onset) + ' bis ' + dateShortFmt.format(a.expires)
             + ' ' + hourFmt.format(a.expires) + ' Uhr';
         }
       } else if (a.expires) {
-        timeEl.textContent = 'Bis ' + hourFmt.format(a.expires) + ' Uhr';
+        timeEl.textContent = 'Bis ' + dateShortFmt.format(a.expires) + ' ' + hourFmt.format(a.expires) + ' Uhr';
       }
 
       body.appendChild(head);
