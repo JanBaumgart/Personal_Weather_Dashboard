@@ -191,6 +191,7 @@
       const data = weatherResult.value;
       WeatherUI.hideError();
       WeatherUI.renderHero(data);
+      WeatherUI.renderClothingAdvice(data);
       setWeatherTheme(
         data.current.weatherCode,
         (WeatherAPI.getLocation && WeatherAPI.getLocation().timezone) || 'UTC'

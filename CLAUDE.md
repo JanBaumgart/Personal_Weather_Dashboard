@@ -93,10 +93,10 @@ The app uses an **IIFE + `window.*` global namespace** pattern instead of ES mod
 - **Skeleton loading**: HTML includes `.skeleton-text` / `.skeleton-box` placeholder elements; `ui.js:removeSkeleton()` strips the class once real data arrives.
 - **Sun arc SVG**: The arc is a fixed `viewBox="0 0 300 160"` semicircle path. The `#sun-dot` circle `cx/cy` is computed in `renderSun()` using trigonometry against the path's geometric centre `(150, 140)` with radius 130.
 - **Hourly view toggle**: The hourly card has a segmented control (Kacheln / Chart) that switches between the tile strip (`#hourly-strip`) and an SVG temperature chart (`#hourly-chart`). Toggle is initialised once via `WeatherUI.initHourlyToggle()` in `app.js:init()`. Both views are re-rendered on every data fetch via `renderHourly(data)` and `renderTempChart(data)`. The chart uses a Catmull-Rom → cubic Bézier smooth curve, gradient fill, horizontal grid lines, temperature dot-labels every 3 h, and precipitation probability bars at the bottom.
-- **DWD Alerts**: `#alerts-section` card (zwischen Hero und Map) wird nur eingeblendet wenn aktive Warnungen vorliegen. Severity-Whitelist: `minor | moderate | severe | extreme`. Die Hero-Pill (`#weather-alert`) wird bei aktiven DWD-Warnungen überschrieben. Bright Sky deckt nur Deutschland ab — für internationale Standorte bleibt die Alert-Card leer (nicht-kritischer Pfad).
+- **DWD Alerts**: `#alerts-section` card (zwischen Hero und Map) wird nur eingeblendet wenn aktive Warnungen vorliegen. Severity-Whitelist: `minor | moderate | severe | extreme`. Die Hero-Pill (`#weather-alert`) zeigt ausschließlich Wettercode-Info (Regen/Schnee/Gewitter/kein Niederschlag) — kein DWD-Override. Aktive Warnungsanzahl erscheint dynamisch im `<h3>`-Titel der Alert-Card via `<span id="alerts-title">`: „2 Unwetterwarnungen" / „1 Unwetterwarnung". Bright Sky deckt nur Deutschland ab — für internationale Standorte bleibt die Alert-Card leer (nicht-kritischer Pfad).
 - **Fetch-Robustheit**: Alle `fetch()`-Aufrufe gehen über `fetchWithTimeout(url, 15000)` mit `AbortController`. Bei fehlschlagendem Alert-Fetch zeigt das Dashboard weiterhin die Wetterdaten (nicht-kritischer Pfad via `Promise.allSettled`). Geocode-Fetch hat 10s Timeout.
-- **CSP**: `style-src` ist in `style-src-elem 'self'` (für `<link>`/`<style>`) und `style-src-attr 'unsafe-inline'` (für Leaflet-interne JS-Styles) aufgeteilt. `img-src` enthält `data:` — wird von `map.js:TRANSPARENT_PX` (1x1-GIF als Fallback für fehlgeschlagene Radar-Tiles im `tileerror`-Handler) benötigt. Kein CDN in `script-src`. `connect-src` enthält auch `https://geocoding-api.open-meteo.com`.
-- **Karte maximieren**: `#map-expand-btn` (unten links auf der Karte, `z-index: 2`) togglet `.map-expanded` auf `.map-card` und `.map-row-expanded` auf `.row-two-col`. Das 2-Spalten-Grid wird dabei zu 1-Spaltig (Sun-Card rutscht darunter), `.map-wrap` wächst auf `65vh` (CSS-Transition 0.3s). `WeatherMap.initMapExpand()` wird einmalig in `app.js:init()` aufgerufen. Nach der Transition: `map.invalidateSize()` damit Leaflet die neue Größe erkennt.
+- **CSP**: `style-src-elem 'self' https://fonts.googleapis.com` (für `<link>` inkl. Google Fonts) + `style-src-attr 'unsafe-inline'` (für Leaflet-interne JS-Styles). `font-src 'self' https://fonts.gstatic.com` für Space Grotesk/Mono. `img-src` enthält `data:` — wird von `map.js:TRANSPARENT_PX` (1x1-GIF als Fallback für fehlgeschlagene Radar-Tiles im `tileerror`-Handler) benötigt. Kein CDN in `script-src`. `connect-src` enthält auch `https://geocoding-api.open-meteo.com`.
+- **Karte maximieren**: `#map-expand-btn` (unten links auf der Karte, `z-index: 2`) togglet `.map-expanded` auf `.map-card`. Map-Card ist seit UI-Redesign standalone (kein `.row-two-col`-Wrapper mehr). `initMapExpand()` in `map.js` hat `if (rowEl)` null-Guard — sicher ohne Wrapper. `.map-wrap` wächst auf `65vh` (CSS-Transition 0.3s). `WeatherMap.initMapExpand()` wird einmalig in `app.js:init()` aufgerufen. Nach der Transition: `map.invalidateSize()` damit Leaflet die neue Größe erkennt.
 - **Maßstab**: `L.control.scale({ position: 'bottomright', imperial: false })` — zeigt Meter/km-Maßstab unten rechts, aktualisiert sich automatisch beim Zoomen. CSS: weißer Text, dunkler Hintergrund, Akzentfarbe als Border.
 - **RainViewer Radar**: `maxNativeZoom: 7` verhindert dass Leaflet Tiles bei Zoom ≥ 8 anfragt (RainViewer liefert dort Fehlerbilder „Zoom Level Not Supported"). Leaflet skaliert stattdessen Zoom-7-Tiles hoch — das ist der einzig zuverlässige Fix. **Nie** canvas-basierte Error-Tile-Erkennung (`getImageData`) verwenden — schlägt wegen CORS-Caching-Inkonsistenzen immer wieder fehl, egal wie die Heuristik tuned wird. Pre-Flight-Probe (z=6,x=33,y=21) prüft Frame vor Aktivierung; Auto-Refresh alle 5 min (`RADAR_REFRESH_MS`) hält Frame-URL frisch; nach 5 aufeinanderfolgenden Refresh-Fehlern stoppt der Timer (`_refreshFailCount`). `data.host` aus der RainViewer API wird gegen Whitelist-Regex validiert bevor URLs konstruiert werden. Bei Zoom > 12 werden Overlays ausgeblendet (Toast „Wetter-Overlays bei dieser Zoomstufe ausgeblendet") und bei Herauszoomen wiederhergestellt.
 - **Standortsuche**: `WeatherAPI.geocode(query)` ruft die Open-Meteo Geocoding API auf (`geocoding-api.open-meteo.com/v1/search`), gibt bis zu 5 normalisierte Treffer zurück. `setLocation(loc)` aktualisiert `activeLocation` — alle folgenden `fetchWeather()`/`fetchAlerts()`-Calls nutzen automatisch die neuen Koordinaten. `app.js:updateLabels(loc)` synchronisiert Header-Subtitle, Seitentitel, Map-Card, Daily-Card und Alerts-Card. `WeatherMap.moveMarker(lat, lon, name)` fliegt den Marker mit `flyTo` (1.2s) zur neuen Position. Nürnberg bleibt `DEFAULT_LOCATION` beim initialen Laden. Input-Validierung: query max 100 Zeichen, Geocode-Ergebnis-Felder je auf 100 Zeichen begrenzt.
@@ -113,9 +113,44 @@ The app uses an **IIFE + `window.*` global namespace** pattern instead of ES mod
 - **Browser-Geolokalisierung**: `#gps-btn` (Crosshair-Icon, `.search-btn.gps-btn`) in `#search-form` direkt nach `#search-btn`. `app.js:useMyLocation()` (async): `navigator.geolocation.getCurrentPosition()` → lat/lon → `WeatherAPI.reverseGeocode(lat, lon)` → `pickLocation()`. Guard: wenn `navigator.geolocation` nicht verfügbar, wird Button ausgeblendet. Fehlerbehandlung: `PositionError.code 1` = Zugriff verweigert, `3` = Timeout — Meldung via `showSearchStatus()`. `weather.js:reverseGeocode(lat, lon)` ruft parallel Nominatim (`nominatim.openstreetmap.org/reverse`, 5s Timeout) + Open-Meteo (`timezone=auto`, 5s Timeout) via `Promise.allSettled` auf; Fallback: `name='Mein Standort'`, `country=''`, `timezone='UTC'`. Button: `disabled` + `.loading`-Klasse während des Fetches (CSS spin-Animation via `.search-btn.loading svg`).
 
 
-## Feature-Roadmap (Stand 22. Apr 2026)
+## UI Design System (Stand 24. Apr 2026)
 
-Aus Idea Pitch.html im Projektroot. Priorität: #1 → #2 → #3.
+**Thema:** Aurora/Glassmorphism — atmosphärisch-wissenschaftlich.
+
+### Fonts
+- `--font-sans: "Space Grotesk"` — alle Labels, Beschreibungen, UI-Text
+- `--font-mono: "Space Mono"` — alle Zahlenwerte: `.hero-temp`, `.stat-value`, `.hourly-temp`, `.daily-temps`, `.sun-time strong`, `.aqi-value`, `.aqi-sub-value`
+- Geladen via Google Fonts (`fonts.googleapis.com` / `fonts.gstatic.com` in CSP)
+
+### Aurora-Hintergrund
+- `.aurora-bg`: `position: fixed; z-index: 0; pointer-events: none` — 3 animierte Orbs (`aurora-orb-1/2/3`), `filter: blur(90px)`, Opacity 0.17
+- Orb-Farben via CSS-Custom-Properties `--orb-1/2/3` (Format: `R, G, B` für `rgb(var(--orb-1))`), per Body-Klasse überschrieben:
+  - `body.w-clear/cloud/rain/storm/snow/fog` — wetterbasierte Farben
+  - `body.time-dawn/dusk/night` — tageszeit-basierte Farben
+- `app.js:setWeatherTheme(wmoCode, timezone)` setzt diese Klassen nach jedem Datenladen
+- `prefers-reduced-motion`: Aurora-Animationen deaktiviert
+- `@media (max-width: 960px)`: Aurora bleibt, Orb-Größen wirken trotzdem gut
+
+### Glassmorphism
+- `.card`: `background: rgba(20,23,36,0.6); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.07)`
+- `.container`: `position: relative; z-index: 1` — Stacking über Aurora (z-index: 0)
+- Sub-Elemente (`.stat`, `.hourly-item`, `.daily-item`, `.sun-time`): `rgba(255,255,255,0.04)` Background
+- **Backdrop-filter sieht Fixed-Elemente**: Kein negatives z-index für Aurora nötig — Browser compositiert Fixed-Elemente in den Blur ein.
+- **Kein `text-shadow` auf gradient-geclippten Text**: `.hero-temp` nutzt `background-clip: text` + `color: transparent`. Glow via `filter: drop-shadow()` auf dem Element (text-shadow wird bei clip ignoriert).
+
+### Layout
+- `div.row-hero-sun`: `display: grid; grid-template-columns: 1.4fr 1fr` — Hero + Sun-Card nebeneinander, bricht bei 960px auf 1 Spalte
+- Map-Card: standalone, kein Wrapper
+
+### Icons
+- Alle UI-Icons als Inline-SVG (kein Emoji mehr): Brand (Cloud), Pin (Location), Error (Warning-Triangle), Sunrise, Sunset, Clock, Search, GPS, Refresh, Alerts-Heading
+- `.brand-mark`, `.pin`, `.error-icon`, `.sun-icon`: Flex-Container für SVG
+
+- **Kleidungsempfehlung**: `getClothingAdvice(current, daily)` in `ui.js` — berechnet Temp-Bucket (apparent ?? temperature), Regen-Check (WMO-Codes 51–67/80–82/95+ ODER precipitation ≥ 0.5 mm), UV ≥ 5 → Sonnenbrille, Wind ≥ 40 km/h → Windjacke, Trend-Vergleich Tage 1–3 via `weekdayFmt`. Gibt `{ items: [{icon, label}], trend: string|null }` zurück. `WeatherUI.renderClothingAdvice(data)` rendert Chip-Reihe + optionalen Trend-Chip in `#clothing-advice` (in `hero-left`, nach `.alert-row`, mit `border-top`-Trennlinie). Aufruf in `app.js:loadAndRender()` direkt nach `renderHero`. Keine extra API-Calls.
+
+## Feature-Roadmap (Stand 25. Apr 2026)
+
+Aus Idea Pitch.html im Projektroot. Alle Features fertig.
 
 ### #1 Dynamische Zeitzone je Standort — FERTIG ✓
 `WeatherMap.setTimezone(tz)` in `map.js` rebuildet `_timeOverlayFmt`. Wird in `app.js` parallel zu `WeatherUI.setTimezone(tz)` an allen 3 Stellen aufgerufen.
@@ -124,7 +159,11 @@ Aus Idea Pitch.html im Projektroot. Priorität: #1 → #2 → #3.
 GPS-Button (`#gps-btn`) in Suchleiste. `app.js:useMyLocation()` → Nominatim + Open-Meteo timezone=auto → `pickLocation()`. `vercel.json` Permissions-Policy auf `geolocation=(self)`. CSP + Privacy-Notice aktualisiert.
 
 ### #3 Luftqualität (AQI) — FERTIG ✓
-`air-quality-api.open-meteo.com/v1/air-quality` (kein Key). `weather.js:fetchAqi()` parallel in `app.js` via `Promise.allSettled`. Map-Toggle-Button (`#map-aqi-btn`, bottom: 140px links) aktiviert `L.circleMarker` am aktuellen Standort + `.map-aqi-overlay` (bottom-right) + `#aqi-card` (nach `#day-detail`) mit `#aqi-current` (EAQI-Wert + PM2.5/PM10/Ozon) und `#aqi-chart` (SVG-Balkendiagramm nächste 24h, farbcodiert nach EAQI-Stufe). Hero-Badge (`#aqi-badge`) nur bei EAQI ≥ 60. CSP + Privacy-Notice angepasst.
+`air-quality-api.open-meteo.com/v1/air-quality` (kein Key). `weather.js:fetchAqi()` + `buildAqiUrl()` (mit `&timeformat=unixtime`) + `aqiColorInfo()`. Parallel in `app.js` via `Promise.allSettled`. `#aqi-card` (nach `#day-detail`) dauerhaft sichtbar — kein Toggle. Map-Button `#map-aqi-btn` (bottom: 140px links) togglet nur Karten-Overlay (`L.circleMarker` + `.map-aqi-overlay` bottom-right). `#aqi-current`: EAQI-Wert + PM2.5/PM10/Ozon. `#aqi-chart`: SVG-Balkendiagramm nächste 24h, farbcodiert nach EAQI-Stufe. `.aqi-legend`: 6 Einträge (Dot + Label + Wertebereich) unter dem Chart. Hero-Badge (`#aqi-badge`) nur bei EAQI ≥ 60. CSP + Privacy-Notice angepasst.
+
+### #4 Kleidungsempfehlung — FERTIG ✓ (25. Apr 2026)
+`WeatherUI.renderClothingAdvice(data)` in `ui.js`. Logik via `getClothingAdvice(current, daily)` — Temp-Buckets, Regen/UV/Wind-Extras, Trend-Chip für die nächsten 3 Tage. UI in `#clothing-advice` (hero-left, unter alert-row). Kein extra API-Call.
+- **DWD Alert-Zeitformat**: Datum wird immer angezeigt (auch bei Same-Day-Warnungen: `dateShortFmt + hourFmt`).
 
 ## Security & Datenschutz
 

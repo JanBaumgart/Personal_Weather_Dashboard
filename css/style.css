@@ -467,6 +467,38 @@ a:hover { text-decoration: underline; }
   opacity: 0.85;
   font-weight: 500;
 }
+/* ---------- Clothing Advice ---------- */
+.clothing-advice {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.clothing-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.clothing-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-sm);
+  padding: 4px 9px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.clothing-icon {
+  font-size: 1em;
+  line-height: 1;
+}
+.clothing-trend {
+  margin-top: 7px;
+  font-size: 0.73rem;
+  color: var(--text-dim);
+  letter-spacing: 0.01em;
+}
 .hero-main {
   display: flex;
   align-items: center;

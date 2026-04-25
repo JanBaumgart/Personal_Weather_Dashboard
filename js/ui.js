@@ -104,6 +104,46 @@
     return 'Extrem';
   }
 
+  // ---------- Clothing advice ----------
+  function getClothingAdvice(current, daily) {
+    var temp = typeof current.apparent === 'number' && !isNaN(current.apparent)
+      ? current.apparent : (typeof current.temperature === 'number' ? current.temperature : 15);
+
+    var items = [];
+
+    if      (temp < 0)  { items.push({ icon: '🧥', label: 'Winterjacke' }); items.push({ icon: '🧤', label: 'Handschuhe' }); items.push({ icon: '🧣', label: 'Mütze & Schal' }); }
+    else if (temp < 8)  items.push({ icon: '🧥', label: 'Winterjacke' });
+    else if (temp < 14) items.push({ icon: '🧥', label: 'Herbstjacke' });
+    else if (temp < 20) items.push({ icon: '🧶', label: 'Leichte Jacke' });
+    else if (temp < 26) items.push({ icon: '👕', label: 'T-Shirt' });
+    else                items.push({ icon: '🩴', label: 'Sommerkleidung' });
+
+    var code       = current.weatherCode;
+    var isRainCode = (code >= 51 && code <= 67) || (code >= 80 && code <= 84) || code >= 95;
+    var isRainMm   = typeof current.precipitation === 'number' && current.precipitation >= 0.5;
+    if (isRainCode || isRainMm) items.push({ icon: '☂️', label: 'Regenschirm' });
+
+    if (typeof current.uvIndex   === 'number' && current.uvIndex   >= 5)  items.push({ icon: '🕶️', label: 'Sonnenbrille' });
+    if (typeof current.windSpeed === 'number' && current.windSpeed >= 40 && temp >= 14) items.push({ icon: '💨', label: 'Windjacke' });
+
+    function _bucket(t) { return t < 0 ? 0 : t < 8 ? 1 : t < 14 ? 2 : t < 20 ? 3 : t < 26 ? 4 : 5; }
+    var todayBucket = _bucket(temp);
+    var trend = null;
+    var days = daily || [];
+    for (var i = 1; i <= 3 && i < days.length; i++) {
+      var d = days[i];
+      if (d && typeof d.tempMax === 'number' && typeof d.tempMin === 'number' && d.date instanceof Date && !isNaN(d.date.getTime())) {
+        var b = _bucket((d.tempMax + d.tempMin) / 2);
+        if (b !== todayBucket) {
+          trend = 'Ab ' + weekdayFmt.format(d.date) + (b > todayBucket ? ' wärmer ↑' : ' kälter ↓');
+          break;
+        }
+      }
+    }
+
+    return { items: items, trend: trend };
+  }
+
   // ---------- Rain timing helper ----------
   const PRECIP_THRESHOLD = 40; // % probability minimum
   function isPrecipCode(code) {
@@ -804,38 +844,23 @@
     extreme:  { label: 'Extrem', icon: '🚨',  cls: 'severity-extreme'  }
   };
 
-  var SEVERITY_ORDER = { minor: 0, moderate: 1, severe: 2, extreme: 3 };
-
   function renderAlerts(alerts) {
     var section = document.getElementById('alerts-section');
     var listEl  = document.getElementById('alerts-list');
-    var countEl = document.getElementById('alerts-count');
-    var alertEl = document.getElementById('weather-alert');
+    var titleEl = document.getElementById('alerts-title');
 
     if (!section || !listEl) return;
 
     if (!alerts || !alerts.length) {
       section.hidden = true;
-      if (alertEl) { alertEl.hidden = true; alertEl.className = 'weather-alert'; alertEl.textContent = ''; }
+      if (titleEl) titleEl.textContent = 'Unwetterwarnungen';
       return;
     }
 
     section.hidden = false;
 
-    if (countEl) {
-      countEl.textContent = alerts.length + ' aktiv';
-    }
-
-    // Override hero pill with highest-severity DWD alert state
-    if (alertEl) {
-      var highest = alerts.reduce(function (acc, a) {
-        return (SEVERITY_ORDER[a.severity] || 0) > (SEVERITY_ORDER[acc.severity] || 0) ? a : acc;
-      }, alerts[0]);
-      var pillMeta = SEVERITY_META[highest.severity] || SEVERITY_META.minor;
-      alertEl.className = 'weather-alert dwd-' + highest.severity;
-      alertEl.textContent = pillMeta.icon + ' ' + alerts.length
-        + ' DWD-Warnung' + (alerts.length > 1 ? 'en' : '') + ' aktiv';
-      alertEl.hidden = false;
+    if (titleEl) {
+      titleEl.textContent = alerts.length + ' Unwetterwarnung' + (alerts.length > 1 ? 'en' : '');
     }
 
     var frag = document.createDocumentFragment();
@@ -1229,6 +1254,42 @@
     btn.disabled = isRefreshing;
   }
 
+  function renderClothingAdvice(data) {
+    var el = document.getElementById('clothing-advice');
+    if (!el || !data || !data.current) return;
+    clearChildren(el);
+
+    var advice = getClothingAdvice(data.current, data.daily);
+    if (!advice.items.length) { el.hidden = true; return; }
+    el.hidden = false;
+    var row = document.createElement('div');
+    row.className = 'clothing-items';
+
+    advice.items.forEach(function (item) {
+      var span    = document.createElement('span');
+      span.className = 'clothing-item';
+      var iconEl  = document.createElement('span');
+      iconEl.className = 'clothing-icon';
+      iconEl.setAttribute('aria-hidden', 'true');
+      iconEl.textContent = item.icon;
+      var labelEl = document.createElement('span');
+      labelEl.className = 'clothing-label';
+      labelEl.textContent = item.label;
+      span.appendChild(iconEl);
+      span.appendChild(labelEl);
+      row.appendChild(span);
+    });
+
+    el.appendChild(row);
+
+    if (advice.trend) {
+      var chip = document.createElement('div');
+      chip.className = 'clothing-trend';
+      chip.textContent = advice.trend;
+      el.appendChild(chip);
+    }
+  }
+
   window.WeatherUI = {
     setTimezone:        setTimezone,
     renderHero:         renderHero,
@@ -1249,6 +1310,7 @@
     updateAqiBadge:     updateAqiBadge,
     setAqiCardVisible:  setAqiCardVisible,
     isAqiCardVisible:   isAqiCardVisible,
-    renderAqiChart:     renderAqiChart
+    renderAqiChart:       renderAqiChart,
+    renderClothingAdvice: renderClothingAdvice
   };
 })();
